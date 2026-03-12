@@ -1,0 +1,14 @@
+[
+  {
+    "date": "2026-03-20",
+    "passType": "enchant",
+    "preferredPark": "either",
+    "status": "either"
+  },
+  {
+    "date": "2026-03-23",
+    "passType": "enchant",
+    "preferredPark": "dl",
+    "status": "dl"
+  }
+]
