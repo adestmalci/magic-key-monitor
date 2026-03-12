@@ -2,16 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertCircle,
   Bell,
   CalendarDays,
+  Check,
   CheckCircle2,
   CircleOff,
   Clock3,
   Mail,
+  Pencil,
   RefreshCcw,
+  Save,
   Trash2,
-  Wand2,
 } from "lucide-react";
 
 type PassType = "inspire" | "believe" | "enchant" | "explore" | "imagine";
@@ -25,7 +26,6 @@ type WatchItem = {
   date: string;
   passType: PassType;
   preferredPark: ParkOption;
-  frequency: FrequencyType;
   currentStatus: StatusType;
   previousStatus: StatusType | null;
   changedAt: string;
@@ -42,48 +42,42 @@ type ToastState = {
   message: string;
 } | null;
 
-const STORAGE_KEY = "magic-key-monitor-v2";
+const STORAGE_KEY = "magic-key-monitor-v3";
 const ENDPOINT_URL = "/api/magic-key-status";
 
 const PASS_TYPES: Array<{
   id: PassType;
   name: string;
-  limit: number;
   accent: string;
   iconPath: string;
 }> = [
   {
     id: "inspire",
     name: "Inspire Key",
-    limit: 6,
     accent: "from-fuchsia-500 to-violet-500",
     iconPath: "/branding/inspire-icon.png",
   },
   {
     id: "believe",
     name: "Believe Key",
-    limit: 6,
     accent: "from-sky-500 to-indigo-500",
     iconPath: "/branding/believe-icon.png",
   },
   {
     id: "enchant",
     name: "Enchant Key",
-    limit: 4,
     accent: "from-violet-500 to-pink-500",
     iconPath: "/branding/enchant-icon.png",
   },
   {
     id: "explore",
     name: "Explore Key",
-    limit: 4,
     accent: "from-emerald-500 to-teal-500",
     iconPath: "/branding/explore-icon.png",
   },
   {
     id: "imagine",
     name: "Imagine Key",
-    limit: 2,
     accent: "from-amber-400 to-orange-500",
     iconPath: "/branding/imagine-icon.png",
   },
@@ -203,26 +197,15 @@ function StatusBadge({ status }: { status: StatusType }) {
         <img src={meta.assetPath} alt={meta.label} className="h-4 w-4 object-contain" />
       ) : status === "blocked" ? (
         <CircleOff className="h-4 w-4" />
-      ) : (
-        <AlertCircle className="h-4 w-4" />
-      )}
+      ) : null}
       {meta.label}
     </span>
   );
 }
 
-function PassPill({ passType }: { passType: PassType }) {
+function PassIcon({ passType }: { passType: PassType }) {
   const pass = PASS_TYPES.find((item) => item.id === passType)!;
-
-  return (
-    <div className="flex items-center gap-3">
-      <img src={pass.iconPath} alt={pass.name} className="h-10 w-10 rounded-2xl object-contain" />
-      <div>
-        <div className="font-medium">{pass.name}</div>
-        <div className="text-sm text-zinc-500">Reservation hold limit: up to {pass.limit}</div>
-      </div>
-    </div>
-  );
+  return <img src={pass.iconPath} alt={pass.name} className="h-7 w-7 object-contain" />;
 }
 
 export default function Home() {
@@ -230,8 +213,8 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<TabKey>("watchlist");
   const [passType, setPassType] = useState<PassType>("enchant");
   const [preferredPark, setPreferredPark] = useState<ParkOption>("either");
-  const [frequency, setFrequency] = useState<FrequencyType>("30m");
-  const [alertsEnabled, setAlertsEnabled] = useState(true);
+  const [syncFrequency, setSyncFrequency] = useState<FrequencyType>("1m");
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
   const [dateInput, setDateInput] = useState("");
@@ -241,6 +224,7 @@ export default function Home() {
   const [lastSyncAt, setLastSyncAt] = useState("");
   const [lastRunSummary, setLastRunSummary] = useState("Ready to sync live Disney data.");
   const [toast, setToast] = useState<ToastState>(null);
+  const [editMode, setEditMode] = useState(false);
 
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -252,7 +236,6 @@ export default function Home() {
           date: "2026-03-20",
           passType: "enchant",
           preferredPark: "either",
-          frequency: "30m",
           currentStatus: "unavailable",
           previousStatus: null,
           changedAt: new Date().toISOString(),
@@ -266,8 +249,8 @@ export default function Home() {
       const parsed = JSON.parse(raw);
       setPassType(parsed.passType ?? "enchant");
       setPreferredPark(parsed.preferredPark ?? "either");
-      setFrequency(parsed.frequency ?? "30m");
-      setAlertsEnabled(parsed.alertsEnabled ?? true);
+      setSyncFrequency(parsed.syncFrequency ?? "1m");
+      setAlertsEnabled(parsed.alertsEnabled ?? false);
       setEmailEnabled(parsed.emailEnabled ?? false);
       setEmailAddress(parsed.emailAddress ?? "");
       setWatchItems(parsed.watchItems ?? []);
@@ -290,7 +273,7 @@ export default function Home() {
       JSON.stringify({
         passType,
         preferredPark,
-        frequency,
+        syncFrequency,
         alertsEnabled,
         emailEnabled,
         emailAddress,
@@ -305,7 +288,7 @@ export default function Home() {
     hydrated,
     passType,
     preferredPark,
-    frequency,
+    syncFrequency,
     alertsEnabled,
     emailEnabled,
     emailAddress,
@@ -337,10 +320,25 @@ export default function Home() {
     [watchItems]
   );
 
-  async function requestNotifications() {
-    if (!canNotify()) return;
+  async function requestNotificationsAndEnable() {
+    if (!canNotify()) {
+      pushToast("error", "Browser notifications are not available here.");
+      return;
+    }
+
     if (Notification.permission === "default") {
-      await Notification.requestPermission();
+      const result = await Notification.requestPermission();
+      if (result !== "granted") {
+        pushToast("error", "Notification permission was not granted.");
+        return;
+      }
+    }
+
+    if (Notification.permission === "granted") {
+      setAlertsEnabled(true);
+      pushToast("success", "Notifications enabled.");
+    } else {
+      pushToast("error", "Notification permission was not granted.");
     }
   }
 
@@ -416,12 +414,12 @@ export default function Home() {
 
   async function maybeNotify(improvedCount: number) {
     if (!(alertsEnabled && improvedCount > 0)) return;
-    await requestNotifications();
-    if (canNotify() && Notification.permission === "granted") {
-      new Notification("Magic Key Monitor", {
-        body: `${improvedCount} watched ${improvedCount === 1 ? "date has" : "dates have"} a better status now.`,
-      });
-    }
+    if (!canNotify()) return;
+    if (Notification.permission !== "granted") return;
+
+    new Notification("Magic Key Monitor", {
+      body: `${improvedCount} watched ${improvedCount === 1 ? "date has" : "dates have"} a better status now.`,
+    });
   }
 
   async function syncFromEndpoint(showToastMessage = true, sourceItems: WatchItem[] = watchItems) {
@@ -470,7 +468,6 @@ export default function Home() {
       date: dateInput,
       passType,
       preferredPark,
-      frequency,
       currentStatus: "unavailable",
       previousStatus: null,
       changedAt: new Date().toISOString(),
@@ -510,20 +507,47 @@ export default function Home() {
     }
   }
 
+  function updateWatchItem(
+    id: string,
+    field: "date" | "passType" | "preferredPark",
+    value: string
+  ) {
+    setWatchItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              [field]: value,
+            }
+          : item
+      )
+    );
+  }
+
+  async function handleEditButton() {
+    if (!editMode) {
+      setEditMode(true);
+      return;
+    }
+
+    setEditMode(false);
+    await syncFromEndpoint(true);
+  }
+
   useEffect(() => {
     if (!hydrated) return;
     void syncFromEndpoint(false);
   }, [hydrated]);
 
   useEffect(() => {
-    if (!hydrated || frequency === "manual") return;
+    if (!hydrated || syncFrequency === "manual") return;
 
     const id = window.setInterval(() => {
       void syncFromEndpoint(false);
-    }, POLL_MS[frequency]);
+    }, POLL_MS[syncFrequency]);
 
     return () => window.clearInterval(id);
-  }, [hydrated, frequency, watchItems]);
+  }, [hydrated, syncFrequency, watchItems]);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(236,72,153,0.10),_transparent_30%),radial-gradient(circle_at_right,_rgba(59,130,246,0.10),_transparent_25%),linear-gradient(to_bottom,_#fff7ed,_#ffffff_28%,_#f8fafc)] text-zinc-900">
@@ -531,19 +555,20 @@ export default function Home() {
         <div className="fixed right-4 top-4 z-50">
           <div
             className={classNames(
-              "rounded-2xl border px-4 py-3 text-sm shadow-lg",
+              "flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm shadow-lg",
               toast.kind === "success"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                 : "border-rose-200 bg-rose-50 text-rose-800"
             )}
           >
+            {toast.kind === "success" ? <Check className="h-4 w-4" /> : null}
             {toast.message}
           </div>
         </div>
       ) : null}
 
       <div className="mx-auto max-w-7xl p-4 md:p-8">
-        <div className="mb-8 grid items-start gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <div className="mb-8 grid items-start gap-4 lg:grid-cols-[1.45fr_1fr]">
           <section className="overflow-hidden rounded-[2rem] bg-white shadow-[0_20px_80px_-30px_rgba(88,28,135,0.35)]">
             <div className="bg-gradient-to-r from-violet-700 via-fuchsia-600 to-sky-500 p-8 text-white">
               <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-sm backdrop-blur">
@@ -551,14 +576,11 @@ export default function Home() {
                 Personal Magic Key reservation watch
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
+              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-start">
                 <div>
                   <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
                     Reservation Watch Dashboard
                   </h1>
-                  <p className="mt-3 max-w-2xl text-sm leading-6 text-white/90 md:text-base">
-                    Embedded icons, cleaner UI, and always-on sync from your server endpoint.
-                  </p>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
@@ -582,35 +604,27 @@ export default function Home() {
           </section>
 
           <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
-            <div className="mb-2 flex items-center gap-2 text-lg font-semibold">
-              <Wand2 className="h-5 w-5 text-violet-600" />
-              Add a watch item
-            </div>
-            <p className="mb-5 text-sm text-zinc-500">
-              Each watched date saves the pass, park preference, and check cadence chosen at add time.
-            </p>
+            <div className="mb-4 text-lg font-semibold">Choose Your Key</div>
 
-            <div className="space-y-3">
-              <label className="text-sm font-medium">Pass type</label>
-              <div className="grid gap-2">
-                {PASS_TYPES.map((pass) => (
-                  <button
-                    key={pass.id}
-                    onClick={() => setPassType(pass.id)}
-                    className={classNames(
-                      "overflow-hidden rounded-2xl border text-left transition",
-                      passType === pass.id
-                        ? "border-violet-500 bg-violet-50 shadow-sm"
-                        : "border-zinc-200 bg-white hover:bg-zinc-50"
-                    )}
-                  >
-                    <div className={classNames("h-2 bg-gradient-to-r", pass.accent)} />
-                    <div className="p-3">
-                      <PassPill passType={pass.id} />
-                    </div>
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+              {PASS_TYPES.map((pass) => (
+                <button
+                  key={pass.id}
+                  onClick={() => setPassType(pass.id)}
+                  className={classNames(
+                    "overflow-hidden rounded-2xl border text-left transition",
+                    passType === pass.id
+                      ? "border-violet-500 bg-violet-50 shadow-sm"
+                      : "border-zinc-200 bg-white hover:bg-zinc-50"
+                  )}
+                >
+                  <div className={classNames("h-1.5 bg-gradient-to-r", pass.accent)} />
+                  <div className="flex flex-col items-center gap-2 p-3 text-center">
+                    <img src={pass.iconPath} alt={pass.name} className="h-8 w-8 object-contain" />
+                    <div className="text-sm font-medium">{pass.name}</div>
+                  </div>
+                </button>
+              ))}
             </div>
 
             <div className="mt-4 space-y-2">
@@ -642,8 +656,8 @@ export default function Home() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Check frequency</label>
                 <select
-                  value={frequency}
-                  onChange={(e) => setFrequency(e.target.value as FrequencyType)}
+                  value={syncFrequency}
+                  onChange={(e) => setSyncFrequency(e.target.value as FrequencyType)}
                   className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
                 >
                   {FREQUENCIES.map((option) => (
@@ -714,12 +728,31 @@ export default function Home() {
 
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
-                  onClick={requestNotifications}
-                  className="flex items-center justify-center gap-2 rounded-2xl border border-zinc-200 px-4 py-3 text-sm font-medium transition hover:bg-zinc-50"
+                  onClick={requestNotificationsAndEnable}
+                  className={classNames(
+                    "flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                    alertsEnabled
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-zinc-200 hover:bg-zinc-50"
+                  )}
                 >
                   <Bell className="h-4 w-4" />
-                  Enable notifications
+                  {alertsEnabled ? "Notifications enabled" : "Enable notifications"}
                 </button>
+
+                <button
+                  onClick={handleEditButton}
+                  className={classNames(
+                    "flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                    editMode
+                      ? "border-amber-200 bg-amber-50 text-amber-800"
+                      : "border-zinc-200 hover:bg-zinc-50"
+                  )}
+                >
+                  {editMode ? <Save className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                  {editMode ? "Save changes" : "Edit watchlist"}
+                </button>
+
                 <button
                   onClick={() => void syncFromEndpoint(true)}
                   className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3 text-sm font-medium text-white transition hover:from-violet-700 hover:to-fuchsia-700"
@@ -734,33 +767,6 @@ export default function Home() {
               {lastRunSummary}
             </div>
 
-            <div className="mb-5 grid gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-zinc-200 p-4">
-                <div className="mb-2 font-medium">How statuses work</div>
-                <div className="space-y-2 text-sm text-zinc-600">
-                  <div className="flex items-start gap-2">
-                    <CircleOff className="mt-0.5 h-4 w-4 text-slate-600" />
-                    <span>
-                      <strong>Blocked Out</strong> means that pass type is not valid for that date.
-                    </span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="mt-0.5 h-4 w-4 text-zinc-600" />
-                    <span>
-                      <strong>No Magic Key Reservations Available</strong> means the pass is valid, but there is no reservation inventory allocated at that moment.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-zinc-200 p-4">
-                <div className="mb-2 font-medium">Auto-refresh behavior</div>
-                <div className="text-sm text-zinc-600">
-                  Your selected frequency auto-refreshes live data while this page is open. True background checks while the page is closed come next.
-                </div>
-              </div>
-            </div>
-
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {upcomingByDate.map((item) => {
                 const pass = PASS_TYPES.find((row) => row.id === item.passType)!;
@@ -771,32 +777,75 @@ export default function Home() {
                     <div className={classNames("h-2 bg-gradient-to-r", pass.accent)} />
                     <div className="p-5">
                       <div className="mb-3 flex items-start justify-between gap-3">
-                        <PassPill passType={item.passType} />
-                        <button
-                          onClick={() => removeDate(item.id)}
-                          className="rounded-xl border border-zinc-200 p-2 text-zinc-500 transition hover:bg-zinc-50"
-                          aria-label={`Remove ${item.date}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <PassIcon passType={item.passType} />
+                          <div className="font-medium">{pass.name}</div>
+                        </div>
+
+                        {editMode ? (
+                          <button
+                            onClick={() => removeDate(item.id)}
+                            className="rounded-xl border border-zinc-200 p-2 text-zinc-500 transition hover:bg-zinc-50"
+                            aria-label={`Remove ${item.date}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        ) : null}
                       </div>
 
-                      <div className="mb-3 text-lg font-semibold">{formatDate(item.date)}</div>
+                      {editMode ? (
+                        <div className="space-y-3">
+                          <input
+                            type="date"
+                            value={item.date}
+                            onChange={(e) => updateWatchItem(item.id, "date", e.target.value)}
+                            className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
+                          />
 
-                      <StatusBadge status={item.currentStatus} />
+                          <select
+                            value={item.passType}
+                            onChange={(e) => updateWatchItem(item.id, "passType", e.target.value)}
+                            className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
+                          >
+                            {PASS_TYPES.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.name}
+                              </option>
+                            ))}
+                          </select>
 
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600">
-                          {parkLabel}
-                        </span>
-                        <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600">
-                          {FREQUENCIES.find((f) => f.value === item.frequency)?.label}
-                        </span>
-                      </div>
+                          <select
+                            value={item.preferredPark}
+                            onChange={(e) => updateWatchItem(item.id, "preferredPark", e.target.value)}
+                            className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
+                          >
+                            {PARK_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mb-3 text-lg font-semibold">{formatDate(item.date)}</div>
 
-                      <div className="mt-4 text-sm text-zinc-500">
-                        Last updated: {formatTimestamp(item.changedAt)}
-                      </div>
+                          <StatusBadge status={item.currentStatus} />
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600">
+                              {parkLabel}
+                            </span>
+                            <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600">
+                              {FREQUENCIES.find((f) => f.value === syncFrequency)?.label}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 text-sm text-zinc-500">
+                            Last updated: {formatTimestamp(item.changedAt)}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -811,9 +860,6 @@ export default function Home() {
               <Clock3 className="h-5 w-5 text-violet-600" />
               Calendar board
             </div>
-            <p className="mb-5 text-sm text-zinc-500">
-              Quick month-style view of your watched dates.
-            </p>
 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
               {Array.from({ length: 31 }, (_, index) => {
@@ -852,7 +898,6 @@ export default function Home() {
         {activeTab === "activity" && (
           <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
             <div className="mb-2 text-lg font-semibold">Sync history</div>
-            <p className="mb-5 text-sm text-zinc-500">Every sync and every watched-date change lands here.</p>
 
             <div className="space-y-3">
               {activity.length === 0 ? (
@@ -874,9 +919,6 @@ export default function Home() {
         {activeTab === "alerts" && (
           <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
             <div className="mb-2 text-lg font-semibold">Alerts</div>
-            <p className="mb-5 text-sm text-zinc-500">
-              Notification preferences live here. Automatic background email alerts are not on yet.
-            </p>
 
             <div className="space-y-5">
               <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-4 py-3">
@@ -904,7 +946,7 @@ export default function Home() {
                     Email alerts placeholder
                   </div>
                   <div className="text-sm text-zinc-500">
-                    This is saved now, but true background email delivery comes in the next step.
+                    Automatic email delivery is not on yet.
                   </div>
                 </div>
                 <input
