@@ -73,14 +73,150 @@ function configureWebPush() {
   return true;
 }
 
+async function sendEmail(to: string, subject: string, html: string) {
+  const resend = getResendClient();
+  if (!resend) {
+    return {
+      ok: true as const,
+      preview: true as const,
+      message: "Preview mode is active because RESEND_API_KEY is not set.",
+    };
+  }
+
+  const from = process.env.RESEND_FROM_EMAIL || "Magic Key Monitor <onboarding@resend.dev>";
+  await resend.emails.send({
+    from,
+    to,
+    subject,
+    html,
+  });
+
+  return {
+    ok: true as const,
+    preview: false as const,
+    message: `Email sent to ${to}.`,
+  };
+}
+
+async function sendPushToUser(
+  state: Awaited<ReturnType<typeof import("./backend").readBackendState>>,
+  userId: string,
+  payload: string
+) {
+  if (!configureWebPush()) {
+    return {
+      ok: false as const,
+      message: "Push delivery is not configured yet.",
+      sent: 0,
+    };
+  }
+
+  const subscriptions = getPushSubscriptionsForUser(state, userId);
+  if (subscriptions.length === 0) {
+    return {
+      ok: false as const,
+      message: "No push subscription is registered for this account on this device yet.",
+      sent: 0,
+    };
+  }
+
+  let sent = 0;
+
+  for (const subscription of subscriptions) {
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: subscription.endpoint,
+          expirationTime: subscription.expirationTime,
+          keys: subscription.keys,
+        },
+        payload
+      );
+      sent += 1;
+    } catch (error: unknown) {
+      const statusCode =
+        typeof error === "object" && error !== null && "statusCode" in error
+          ? Number((error as { statusCode?: number }).statusCode)
+          : 0;
+      if (statusCode === 404 || statusCode === 410) {
+        await removePushSubscriptionForUser(userId, subscription.endpoint);
+      }
+    }
+  }
+
+  if (sent === 0) {
+    return {
+      ok: false as const,
+      message: "Push delivery could not reach any active subscriptions.",
+      sent,
+    };
+  }
+
+  return {
+    ok: true as const,
+    message: `Push sent to ${sent} ${sent === 1 ? "subscription" : "subscriptions"}.`,
+    sent,
+  };
+}
+
+export async function sendTestEmailForUser(
+  state: Awaited<ReturnType<typeof import("./backend").readBackendState>>,
+  userId: string
+) {
+  const user = getUserFromState(state, userId);
+  if (!user) {
+    return { ok: false as const, message: "We couldn't find that signed-in account." };
+  }
+
+  const preferences = getPreferencesFromState(state, userId);
+  const emailTarget = preferences.emailAddress || user.email;
+  if (!emailTarget) {
+    return { ok: false as const, message: "Add an email address first." };
+  }
+
+  return sendEmail(
+    emailTarget,
+    "Your Magic Key Monitor test email",
+    createEmailHtml(emailTarget, [
+      {
+        item: {
+          id: "preview",
+          userId,
+          date: new Date().toISOString().slice(0, 10),
+          passType: "enchant",
+          preferredPark: "either",
+          currentStatus: "either",
+          previousStatus: "unavailable",
+          lastCheckedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        previousStatus: "unavailable",
+        currentStatus: "either",
+      },
+    ])
+  );
+}
+
+export async function sendTestPushForUser(
+  state: Awaited<ReturnType<typeof import("./backend").readBackendState>>,
+  userId: string
+) {
+  return sendPushToUser(
+    state,
+    userId,
+    JSON.stringify({
+      title: "Magic Key Monitor",
+      body: "Your test push arrived. This device is ready for watched-date changes.",
+      url: "/?tab=alerts",
+    })
+  );
+}
+
 export async function sendAlertsForChanges(
   state: Awaited<ReturnType<typeof import("./backend").readBackendState>>,
   changesByUser: Map<string, AlertChange[]>
 ) {
-  const resend = getResendClient();
-  const pushReady = configureWebPush();
-  const from = process.env.RESEND_FROM_EMAIL || "Magic Key Monitor <onboarding@resend.dev>";
-
   for (const [userId, changes] of changesByUser.entries()) {
     const user = getUserFromState(state, userId);
     if (!user || changes.length === 0) continue;
@@ -88,38 +224,16 @@ export async function sendAlertsForChanges(
     const preferences = getPreferencesFromState(state, userId);
     const emailTarget = preferences.emailAddress || user.email;
 
-    if (preferences.emailEnabled && resend && emailTarget) {
-      await resend.emails.send({
-        from,
-        to: emailTarget,
-        subject: `${changes.length} Magic Key update${changes.length === 1 ? "" : "s"}`,
-        html: createEmailHtml(emailTarget, changes),
-      });
+    if (preferences.emailEnabled && emailTarget) {
+      await sendEmail(
+        emailTarget,
+        `${changes.length} Magic Key update${changes.length === 1 ? "" : "s"}`,
+        createEmailHtml(emailTarget, changes)
+      );
     }
 
-    if (preferences.pushEnabled && pushReady) {
-      const subscriptions = getPushSubscriptionsForUser(state, userId);
-
-      for (const subscription of subscriptions) {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: subscription.endpoint,
-              expirationTime: subscription.expirationTime,
-              keys: subscription.keys,
-            },
-            createPushPayload(changes)
-          );
-        } catch (error: unknown) {
-          const statusCode =
-            typeof error === "object" && error !== null && "statusCode" in error
-              ? Number((error as { statusCode?: number }).statusCode)
-              : 0;
-          if (statusCode === 404 || statusCode === 410) {
-            await removePushSubscriptionForUser(userId, subscription.endpoint);
-          }
-        }
-      }
+    if (preferences.pushEnabled) {
+      await sendPushToUser(state, userId, createPushPayload(changes));
     }
   }
 }

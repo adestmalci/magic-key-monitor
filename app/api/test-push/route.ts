@@ -1,14 +1,14 @@
 import { getSessionUser, readBackendState } from "../../../lib/magic-key/backend";
-import { sendTestEmailForUser } from "../../../lib/magic-key/notifications";
+import { sendTestPushForUser } from "../../../lib/magic-key/notifications";
 
 export async function POST() {
   const user = await getSessionUser();
   if (!user) {
-    return Response.json({ error: "Sign in first to send a test email." }, { status: 401 });
+    return Response.json({ error: "Sign in first to send a test push." }, { status: 401 });
   }
 
   const state = await readBackendState();
-  const result = await sendTestEmailForUser(state, user.id);
+  const result = await sendTestPushForUser(state, user.id);
 
   if (!result.ok) {
     return Response.json({ error: result.message }, { status: 400 });
@@ -16,7 +16,7 @@ export async function POST() {
 
   return Response.json({
     ok: true,
-    preview: result.preview,
+    sent: result.sent,
     message: result.message,
   });
 }

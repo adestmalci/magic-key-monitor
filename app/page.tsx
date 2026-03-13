@@ -69,6 +69,8 @@ export default function Home() {
   const [authMessage, setAuthMessage] = useState("");
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [pushPublicKey, setPushPublicKey] = useState("");
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [isSendingTestPush, setIsSendingTestPush] = useState(false);
 
   const [dateInput, setDateInput] = useState("");
   const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
@@ -605,6 +607,50 @@ export default function Home() {
     [watchItems, prependActivity, sessionUser]
   );
 
+  const syncPushSubscription = useCallback(
+    async (createIfMissing: boolean) => {
+      if (!sessionUser || !pushPublicKey || !canUsePushManager()) {
+        return false;
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.ready;
+
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription && createIfMissing) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
+          });
+        }
+
+        if (!subscription) {
+          setPushEnabled(false);
+          return false;
+        }
+
+        const response = await fetch("/api/push-subscriptions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(subscription),
+        });
+
+        if (!response.ok) {
+          throw new Error("Push subscription sync failed.");
+        }
+
+        setPushEnabled(true);
+        setAlertsEnabled(true);
+        return true;
+      } catch {
+        setPushEnabled(false);
+        return false;
+      }
+    },
+    [pushPublicKey, sessionUser]
+  );
+
   const requestNotifications = useCallback(async () => {
     if (!canNotify()) {
       pushToast("error", "Browser notifications are not available here.");
@@ -620,34 +666,26 @@ export default function Home() {
     }
 
     setAlertsEnabled(true);
-    pushToast("success", "Browser notifications enabled.");
 
     if (!sessionUser || !pushPublicKey || !canUsePushManager()) {
+      pushToast("success", "Browser notifications enabled.");
       return;
     }
 
-    try {
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      const existingSubscription = await registration.pushManager.getSubscription();
-      const subscription =
-        existingSubscription ||
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
-        }));
-
-      await fetch("/api/push-subscriptions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(subscription),
-      });
-
-      setPushEnabled(true);
+    const synced = await syncPushSubscription(true);
+    if (synced) {
       pushToast("success", "Background push is ready for this signed-in device.");
-    } catch {
-      pushToast("error", "Notifications are on, but this browser could not finish push setup.");
+      return;
     }
-  }, [pushPublicKey, pushToast, sessionUser]);
+
+    pushToast("success", "Browser notifications are enabled. Background push still needs this device to finish setup.");
+  }, [pushPublicKey, pushToast, sessionUser, syncPushSubscription]);
+
+  useEffect(() => {
+    if (!sessionUser || !pushPublicKey || !canUsePushManager()) return;
+    if (!canNotify() || Notification.permission !== "granted") return;
+    void syncPushSubscription(false);
+  }, [pushPublicKey, sessionUser, syncPushSubscription]);
 
   const requestMagicLink = useCallback(async () => {
     if (!authEmail.trim()) {
@@ -678,11 +716,69 @@ export default function Home() {
   }, [authEmail, pushToast]);
 
   const signOut = useCallback(async () => {
+    if (sessionUser && canUsePushManager()) {
+      try {
+        const registration = await navigator.serviceWorker.getRegistration();
+        const subscription = await registration?.pushManager.getSubscription();
+
+        if (subscription) {
+          await fetch("/api/push-subscriptions", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ endpoint: subscription.endpoint }),
+          });
+          await subscription.unsubscribe().catch(() => undefined);
+        }
+      } catch {
+        // Best-effort cleanup for the current device.
+      }
+    }
+
     await fetch("/api/auth/session", { method: "DELETE" });
     setSessionUser(null);
     setPushEnabled(false);
     setAuthMessage("");
     pushToast("success", "Signed out. Your local view is still here if you want to keep browsing.");
+  }, [pushToast, sessionUser]);
+
+  const sendTestEmail = useCallback(async () => {
+    setIsSendingTestEmail(true);
+
+    try {
+      const response = await fetch("/api/test-email", {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        pushToast("error", data.error || "We couldn't send the test email.");
+        return;
+      }
+
+      pushToast("success", data.preview ? "Preview email generated successfully." : data.message || "Test email sent.");
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  }, [pushToast]);
+
+  const sendTestPush = useCallback(async () => {
+    setIsSendingTestPush(true);
+
+    try {
+      const response = await fetch("/api/test-push", {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        pushToast("error", data.error || "We couldn't send the test push.");
+        return;
+      }
+
+      pushToast("success", data.message || "Test push sent.");
+    } finally {
+      setIsSendingTestPush(false);
+    }
   }, [pushToast]);
 
   const tabs: Array<{ id: TabKey; label: string }> = [
@@ -763,9 +859,17 @@ export default function Home() {
             pushEnabled={pushEnabled}
             requestNotifications={() => void requestNotifications()}
             emailEnabled={emailEnabled}
+            notificationsSupported={canNotify()}
+            notificationsGranted={canNotify() && Notification.permission === "granted"}
+            pushSupported={canUsePushManager()}
+            pushConfigured={Boolean(pushPublicKey)}
+            isSendingTestEmail={isSendingTestEmail}
+            isSendingTestPush={isSendingTestPush}
             onEmailEnabledChange={setEmailEnabled}
             emailAddress={emailAddress}
             onEmailAddressChange={setEmailAddress}
+            onSendTestEmail={() => void sendTestEmail()}
+            onSendTestPush={() => void sendTestPush()}
           />
         )}
       </div>
