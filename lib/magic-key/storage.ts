@@ -60,7 +60,12 @@ async function requestSupabase<T>(query: string, init?: RequestInit): Promise<T>
     return null as T;
   }
 
-  return (await response.json()) as T;
+  const body = await response.text();
+  if (!body.trim()) {
+    return null as T;
+  }
+
+  return JSON.parse(body) as T;
 }
 
 async function readRemoteValue<T>(storageKey: string): Promise<T | null> {
