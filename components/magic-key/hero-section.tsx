@@ -1,14 +1,17 @@
 import { Sparkles } from "lucide-react";
 import { formatSyncTime } from "../../lib/magic-key/utils";
+import type { SyncMeta } from "../../lib/magic-key/types";
 
 export function HeroSection({
   watchCount,
   lastSyncAt,
   lastRunSummary,
+  syncMeta,
 }: {
   watchCount: number;
   lastSyncAt: string;
   lastRunSummary: string;
+  syncMeta: SyncMeta;
 }) {
   return (
     <div className="rounded-[36px] bg-gradient-to-br from-violet-700 via-fuchsia-600 to-sky-500 p-8 text-white shadow-xl shadow-violet-200/60">
@@ -35,6 +38,10 @@ export function HeroSection({
             <div className="text-xs uppercase tracking-[0.22em] text-white/75">Last live sync</div>
             <div className="mt-2 text-lg font-semibold">{formatSyncTime(lastSyncAt)}</div>
             <div className="mt-1 text-xs text-white/75">{lastRunSummary}</div>
+            <div className="mt-3 inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-medium text-white/90">
+              {syncMeta.stale ? "Snapshot sparkle mode" : "Live Disney mode"}
+            </div>
+            <div className="mt-2 text-xs text-white/80">{syncMeta.message}</div>
           </div>
         </div>
       </div>

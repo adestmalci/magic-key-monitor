@@ -2,18 +2,26 @@
 
 import { ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
 import { PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
+import type { WatchItem } from "../../lib/magic-key/types";
 import { formatMonthLabel } from "../../lib/magic-key/utils";
 import { PassIcon, ParkIcon } from "./icons";
 import { StatusBadge } from "./status-badge";
 
+type CalendarCell = { date: string; day: number } | null;
+
 export function CalendarSection({
   displayedMonth,
-  setDisplayedMonth,
-  previousMonthKey,
-  nextMonthKey,
   calendarRows,
   watchedByDate,
-}: any) {
+  onPreviousMonth,
+  onNextMonth,
+}: {
+  displayedMonth: string;
+  calendarRows: CalendarCell[][];
+  watchedByDate: Map<string, WatchItem[]>;
+  onPreviousMonth: () => void;
+  onNextMonth: () => void;
+}) {
   return (
     <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -31,7 +39,7 @@ export function CalendarSection({
         <div className="inline-flex items-center gap-2 self-start rounded-2xl border border-zinc-200 bg-zinc-50 p-2">
           <button
             type="button"
-            onClick={() => setDisplayedMonth(previousMonthKey(displayedMonth))}
+            onClick={onPreviousMonth}
             className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-white"
             aria-label="Previous month"
           >
@@ -44,7 +52,7 @@ export function CalendarSection({
 
           <button
             type="button"
-            onClick={() => setDisplayedMonth(nextMonthKey(displayedMonth))}
+            onClick={onNextMonth}
             className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-white"
             aria-label="Next month"
           >
@@ -62,9 +70,9 @@ export function CalendarSection({
       </div>
 
       <div className="mt-3 grid gap-3">
-        {calendarRows.map((row: any, rowIndex: number) => (
+        {calendarRows.map((row, rowIndex: number) => (
           <div key={rowIndex} className="grid grid-cols-7 gap-3">
-            {row.map((cell: any, cellIndex: number) => {
+            {row.map((cell, cellIndex: number) => {
               if (!cell) {
                 return (
                   <div
@@ -99,9 +107,9 @@ export function CalendarSection({
                     <div className="mt-6 text-sm text-zinc-400">Not watched</div>
                   ) : (
                     <div className="mt-3 space-y-2">
-                      {items.slice(0, 2).map((item: any) => {
-                        const pass = PASS_TYPES.find((row: any) => row.id === item.passType)!;
-                        const park = PARK_OPTIONS.find((row: any) => row.value === item.preferredPark)!;
+                      {items.slice(0, 2).map((item) => {
+                        const pass = PASS_TYPES.find((row) => row.id === item.passType)!;
+                        const park = PARK_OPTIONS.find((row) => row.value === item.preferredPark)!;
 
                         return (
                           <div

@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Magic Key Monitor",
   description: "Personal Magic Key reservation tracking app",
+  manifest: "/manifest.webmanifest",
 };
 
 export default function RootLayout({

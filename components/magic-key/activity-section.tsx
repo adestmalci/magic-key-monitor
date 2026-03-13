@@ -34,9 +34,7 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   );
 }
 
-export function ActivitySection(props: any) {
-  const activity: ActivityItem[] = Array.isArray(props.activity) ? props.activity : [];
-
+export function ActivitySection({ activity }: { activity: ActivityItem[] }) {
   return (
     <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="flex items-center gap-2 text-2xl font-semibold text-zinc-900">

@@ -1,4 +1,4 @@
-import type { FeedRow, StatusType, WatchItem } from "./types";
+import type { FeedRow, StatusType, SyncMeta, WatchItem } from "./types";
 
 export function classNames(...items: Array<string | false | null | undefined>) {
   return items.filter(Boolean).join(" ");
@@ -72,6 +72,14 @@ export function canNotify() {
   return typeof window !== "undefined" && "Notification" in window;
 }
 
+export function canUsePushManager() {
+  return (
+    typeof window !== "undefined" &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window
+  );
+}
+
 export function nextMonthKey(monthKey: string) {
   const [year, month] = monthKey.split("-").map(Number);
   const next = new Date(year, month, 1);
@@ -111,4 +119,29 @@ export function resolveStatus(
   }
 
   return "unavailable";
+}
+
+export function syncMetaFromHeaders(headers: Headers): SyncMeta {
+  const mode = headers.get("X-Magic-Key-Source");
+  return {
+    lastSuccessfulSyncAt: headers.get("X-Magic-Key-Last-Successful-Sync") || "",
+    lastAttemptedSyncAt: "",
+    mode: mode === "live-disney" || mode === "snapshot-fallback" || mode === "cached" ? mode : "snapshot-fallback",
+    stale: headers.get("X-Magic-Key-Stale") === "1",
+    message: headers.get("X-Magic-Key-Status") || "Pixie dust is standing by for the next live sync.",
+    lastError: "",
+  };
+}
+
+export function urlBase64ToUint8Array(base64String: string) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+
+  return outputArray;
 }

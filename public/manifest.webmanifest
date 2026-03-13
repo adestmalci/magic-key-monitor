@@ -1,0 +1,21 @@
+{
+  "name": "Magic Key Monitor",
+  "short_name": "Magic Key",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#7c3aed",
+  "description": "Track Disneyland Magic Key availability with live syncs, alerts, and push-ready background updates.",
+  "icons": [
+    {
+      "src": "/branding/enchant-icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/branding/inspire-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

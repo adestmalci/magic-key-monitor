@@ -1,105 +1,15 @@
 [
   {
-    "date": "2026-03-12",
-    "passType": "inspire",
-    "preferredPark": "either",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "inspire",
-    "preferredPark": "dl",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "inspire",
-    "preferredPark": "dca",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "believe",
-    "preferredPark": "either",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "believe",
-    "preferredPark": "dl",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "believe",
-    "preferredPark": "dca",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "enchant",
-    "preferredPark": "either",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "enchant",
-    "preferredPark": "dl",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "enchant",
-    "preferredPark": "dca",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "explore",
-    "preferredPark": "either",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "explore",
-    "preferredPark": "dl",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "explore",
-    "preferredPark": "dca",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "imagine",
-    "preferredPark": "either",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "imagine",
-    "preferredPark": "dl",
-    "status": "unavailable"
-  },
-  {
-    "date": "2026-03-12",
-    "passType": "imagine",
-    "preferredPark": "dca",
-    "status": "unavailable"
-  },
-  {
     "date": "2026-03-13",
     "passType": "inspire",
     "preferredPark": "either",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
     "passType": "inspire",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
@@ -111,13 +21,13 @@
     "date": "2026-03-13",
     "passType": "believe",
     "preferredPark": "either",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
     "passType": "believe",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
@@ -129,13 +39,13 @@
     "date": "2026-03-13",
     "passType": "enchant",
     "preferredPark": "either",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
     "passType": "enchant",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
@@ -147,13 +57,13 @@
     "date": "2026-03-13",
     "passType": "explore",
     "preferredPark": "either",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
     "passType": "explore",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
@@ -165,13 +75,13 @@
     "date": "2026-03-13",
     "passType": "imagine",
     "preferredPark": "either",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
     "passType": "imagine",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-13",
@@ -363,13 +273,13 @@
     "date": "2026-03-16",
     "passType": "inspire",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "either"
   },
   {
     "date": "2026-03-16",
     "passType": "inspire",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-16",
@@ -381,13 +291,13 @@
     "date": "2026-03-16",
     "passType": "believe",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "either"
   },
   {
     "date": "2026-03-16",
     "passType": "believe",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-16",
@@ -399,13 +309,13 @@
     "date": "2026-03-16",
     "passType": "enchant",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "either"
   },
   {
     "date": "2026-03-16",
     "passType": "enchant",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-16",
@@ -417,13 +327,13 @@
     "date": "2026-03-16",
     "passType": "explore",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "either"
   },
   {
     "date": "2026-03-16",
     "passType": "explore",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-16",
@@ -435,13 +345,13 @@
     "date": "2026-03-16",
     "passType": "imagine",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "either"
   },
   {
     "date": "2026-03-16",
     "passType": "imagine",
     "preferredPark": "dl",
-    "status": "unavailable"
+    "status": "dl"
   },
   {
     "date": "2026-03-16",
@@ -1353,43 +1263,43 @@
     "date": "2026-03-27",
     "passType": "inspire",
     "preferredPark": "either",
-    "status": "dca"
-  },
-  {
-    "date": "2026-03-27",
-    "passType": "inspire",
-    "preferredPark": "dl",
     "status": "unavailable"
   },
   {
     "date": "2026-03-27",
     "passType": "inspire",
-    "preferredPark": "dca",
-    "status": "dca"
-  },
-  {
-    "date": "2026-03-27",
-    "passType": "believe",
-    "preferredPark": "either",
-    "status": "dca"
-  },
-  {
-    "date": "2026-03-27",
-    "passType": "believe",
     "preferredPark": "dl",
+    "status": "unavailable"
+  },
+  {
+    "date": "2026-03-27",
+    "passType": "inspire",
+    "preferredPark": "dca",
     "status": "unavailable"
   },
   {
     "date": "2026-03-27",
     "passType": "believe",
+    "preferredPark": "either",
+    "status": "unavailable"
+  },
+  {
+    "date": "2026-03-27",
+    "passType": "believe",
+    "preferredPark": "dl",
+    "status": "unavailable"
+  },
+  {
+    "date": "2026-03-27",
+    "passType": "believe",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-03-27",
     "passType": "enchant",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-03-27",
@@ -1401,13 +1311,13 @@
     "date": "2026-03-27",
     "passType": "enchant",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-03-27",
     "passType": "explore",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-03-27",
@@ -1419,13 +1329,13 @@
     "date": "2026-03-27",
     "passType": "explore",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-03-27",
     "passType": "imagine",
     "preferredPark": "either",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-03-27",
@@ -1437,7 +1347,7 @@
     "date": "2026-03-27",
     "passType": "imagine",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-03-28",
@@ -3423,25 +3333,25 @@
     "date": "2026-04-19",
     "passType": "inspire",
     "preferredPark": "either",
-    "status": "either"
-  },
-  {
-    "date": "2026-04-19",
-    "passType": "inspire",
-    "preferredPark": "dl",
     "status": "dl"
   },
   {
     "date": "2026-04-19",
     "passType": "inspire",
+    "preferredPark": "dl",
+    "status": "dl"
+  },
+  {
+    "date": "2026-04-19",
+    "passType": "inspire",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-04-19",
     "passType": "believe",
     "preferredPark": "either",
-    "status": "either"
+    "status": "dl"
   },
   {
     "date": "2026-04-19",
@@ -3453,13 +3363,13 @@
     "date": "2026-04-19",
     "passType": "believe",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-04-19",
     "passType": "enchant",
     "preferredPark": "either",
-    "status": "either"
+    "status": "dl"
   },
   {
     "date": "2026-04-19",
@@ -3471,13 +3381,13 @@
     "date": "2026-04-19",
     "passType": "enchant",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-04-19",
     "passType": "explore",
     "preferredPark": "either",
-    "status": "either"
+    "status": "dl"
   },
   {
     "date": "2026-04-19",
@@ -3489,7 +3399,7 @@
     "date": "2026-04-19",
     "passType": "explore",
     "preferredPark": "dca",
-    "status": "dca"
+    "status": "unavailable"
   },
   {
     "date": "2026-04-19",
