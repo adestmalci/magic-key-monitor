@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CalendarDays,
-  Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CircleOff,
   Clock3,
   Mail,
-  Pencil,
   RefreshCcw,
-  Save,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 
@@ -20,6 +20,14 @@ type ParkOption = "either" | "dl" | "dca";
 type StatusType = "either" | "dl" | "dca" | "unavailable" | "blocked";
 type FrequencyType = "manual" | "1m" | "5m" | "10m" | "15m" | "30m";
 type TabKey = "watchlist" | "calendar" | "activity" | "alerts";
+type SyncSource = "manual" | "auto" | "startup";
+
+type FeedRow = {
+  date: string;
+  passType: PassType;
+  preferredPark: ParkOption;
+  status: StatusType | string;
+};
 
 type WatchItem = {
   id: string;
@@ -28,13 +36,14 @@ type WatchItem = {
   preferredPark: ParkOption;
   currentStatus: StatusType;
   previousStatus: StatusType | null;
-  changedAt: string;
+  lastCheckedAt: string;
 };
 
 type ActivityItem = {
   id: string;
-  message: string;
   createdAt: string;
+  source: SyncSource | "system";
+  message: string;
 };
 
 type ToastState = {
@@ -42,46 +51,113 @@ type ToastState = {
   message: string;
 } | null;
 
-const STORAGE_KEY = "magic-key-monitor-v3";
+const STORAGE_KEY = "magic-key-monitor-v4";
 const ENDPOINT_URL = "/api/magic-key-status";
 
 const PASS_TYPES: Array<{
   id: PassType;
   name: string;
+  short: string;
   accent: string;
   iconPath: string;
 }> = [
   {
     id: "inspire",
     name: "Inspire Key",
-    accent: "from-fuchsia-500 to-violet-500",
+    short: "Inspire",
+    accent: "from-rose-400 to-pink-500",
     iconPath: "/branding/inspire-icon.png",
   },
   {
     id: "believe",
     name: "Believe Key",
-    accent: "from-sky-500 to-indigo-500",
+    short: "Believe",
+    accent: "from-sky-400 to-indigo-500",
     iconPath: "/branding/believe-icon.png",
   },
   {
     id: "enchant",
     name: "Enchant Key",
-    accent: "from-violet-500 to-pink-500",
+    short: "Enchant",
+    accent: "from-violet-500 to-fuchsia-500",
     iconPath: "/branding/enchant-icon.png",
   },
   {
     id: "explore",
     name: "Explore Key",
-    accent: "from-emerald-500 to-teal-500",
+    short: "Explore",
+    accent: "from-amber-400 to-orange-500",
     iconPath: "/branding/explore-icon.png",
   },
   {
     id: "imagine",
     name: "Imagine Key",
-    accent: "from-amber-400 to-orange-500",
+    short: "Imagine",
+    accent: "from-cyan-400 to-sky-500",
     iconPath: "/branding/imagine-icon.png",
   },
 ];
+
+const PARK_OPTIONS: Array<{
+  value: ParkOption;
+  label: string;
+  iconPath: string;
+}> = [
+  {
+    value: "either",
+    label: "Either Park",
+    iconPath: "/branding/either-available.png",
+  },
+  {
+    value: "dl",
+    label: "Disneyland",
+    iconPath: "/branding/disneyland-available.png",
+  },
+  {
+    value: "dca",
+    label: "California Adventure",
+    iconPath: "/branding/dca-available.png",
+  },
+];
+
+const STATUS_META: Record<
+  StatusType,
+  {
+    label: string;
+    compactLabel: string;
+    tone: string;
+    iconPath?: string;
+  }
+> = {
+  either: {
+    label: "Either Park Available",
+    compactLabel: "Either Park Open",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    iconPath: "/branding/either-available.png",
+  },
+  dl: {
+    label: "Disneyland Park Available",
+    compactLabel: "Disneyland Open",
+    tone: "border-pink-200 bg-pink-50 text-pink-800",
+    iconPath: "/branding/disneyland-available.png",
+  },
+  dca: {
+    label: "Disney California Adventure Park Available",
+    compactLabel: "DCA Open",
+    tone: "border-cyan-200 bg-cyan-50 text-cyan-800",
+    iconPath: "/branding/dca-available.png",
+  },
+  unavailable: {
+    label: "No Magic Key Reservations Available",
+    compactLabel: "No Reservations",
+    tone: "border-zinc-200 bg-zinc-100 text-zinc-700",
+  },
+  blocked: {
+    label: "Blocked Out",
+    compactLabel: "Blocked Out",
+    tone: "border-slate-300 bg-slate-100 text-slate-700",
+  },
+};
 
 const FREQUENCIES: Array<{ value: FrequencyType; label: string }> = [
   { value: "manual", label: "Manual only" },
@@ -101,50 +177,20 @@ const POLL_MS: Record<FrequencyType, number> = {
   "30m": 1_800_000,
 };
 
-const PARK_OPTIONS: Array<{ value: ParkOption; label: string }> = [
-  { value: "either", label: "Either park" },
-  { value: "dl", label: "Disneyland only" },
-  { value: "dca", label: "California Adventure only" },
-];
-
-const STATUS_META: Record<
-  StatusType,
-  {
-    label: string;
-    tone: string;
-    assetPath?: string;
-  }
-> = {
-  either: {
-    label: "Either Park Available",
-    tone: "bg-emerald-50 text-emerald-800 border-emerald-200",
-    assetPath: "/branding/either-available.png",
-  },
-  dl: {
-    label: "Disneyland Park Available",
-    tone: "bg-pink-50 text-pink-800 border-pink-200",
-    assetPath: "/branding/disneyland-available.png",
-  },
-  dca: {
-    label: "Disney California Adventure Park Available",
-    tone: "bg-cyan-50 text-cyan-800 border-cyan-200",
-    assetPath: "/branding/dca-available.png",
-  },
-  unavailable: {
-    label: "No Magic Key Reservations Available",
-    tone: "bg-zinc-100 text-zinc-800 border-zinc-200",
-  },
-  blocked: {
-    label: "Blocked Out",
-    tone: "bg-slate-100 text-slate-800 border-slate-300",
-  },
-};
-
 function classNames(...items: Array<string | false | null | undefined>) {
   return items.filter(Boolean).join(" ");
 }
 
-function formatDate(dateStr: string) {
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthKeyFromDate(dateStr: string) {
+  return dateStr.slice(0, 7);
+}
+
+function formatWatchDate(dateStr: string) {
   const date = new Date(`${dateStr}T12:00:00`);
   return new Intl.DateTimeFormat("en-US", {
     weekday: "short",
@@ -154,7 +200,25 @@ function formatDate(dateStr: string) {
   }).format(date);
 }
 
-function formatTimestamp(iso: string) {
+function formatMonthLabel(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
+}
+
+function formatSyncTime(iso: string) {
+  if (!iso) return "Waiting for live sync";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+function formatActivityTime(iso: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -170,96 +234,202 @@ function comparePriority(status: StatusType) {
   return 1;
 }
 
-function canNotify() {
-  return typeof window !== "undefined" && "Notification" in window;
-}
-
 function normalizeStatus(value: string): StatusType {
-  const normalized = String(value || "").toLowerCase();
+  const normalized = String(value || "").trim().toLowerCase();
+
   if (["either", "both", "either-park", "either_park"].includes(normalized)) return "either";
   if (["dl", "disneyland"].includes(normalized)) return "dl";
-  if (["dca", "californiaadventure", "california-adventure", "adventure"].includes(normalized)) return "dca";
+  if (["dca", "californiaadventure", "california-adventure", "adventure"].includes(normalized))
+    return "dca";
   if (["blocked", "blockout", "blockedout"].includes(normalized)) return "blocked";
   return "unavailable";
 }
 
-function StatusBadge({ status }: { status: StatusType }) {
+function canNotify() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+function nextMonthKey(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const next = new Date(year, month, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function previousMonthKey(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const prev = new Date(year, month - 2, 1);
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function buildFeedLookup(rows: FeedRow[]) {
+  const lookup = new Map<string, StatusType>();
+
+  for (const row of rows) {
+    if (!row?.date || !row?.passType || !row?.preferredPark) continue;
+    const key = `${row.date}__${row.passType}__${row.preferredPark}`;
+    lookup.set(key, normalizeStatus(String(row.status ?? "")));
+  }
+
+  return lookup;
+}
+
+function resolveStatus(
+  item: Pick<WatchItem, "date" | "passType" | "preferredPark">,
+  lookup: Map<string, StatusType>
+): StatusType {
+  const exact = lookup.get(`${item.date}__${item.passType}__${item.preferredPark}`);
+  if (exact) return exact;
+
+  const either = lookup.get(`${item.date}__${item.passType}__either`);
+  if (either) {
+    if (item.preferredPark === "dl" && either === "either") return "dl";
+    if (item.preferredPark === "dca" && either === "either") return "dca";
+    return either;
+  }
+
+  return "unavailable";
+}
+
+function PassIcon({ passType, size = "h-5 w-5" }: { passType: PassType; size?: string }) {
+  const pass = PASS_TYPES.find((item) => item.id === passType)!;
+  return <img src={pass.iconPath} alt={pass.name} className={classNames(size, "object-contain")} />;
+}
+
+function ParkIcon({ park, size = "h-4 w-4" }: { park: ParkOption | StatusType; size?: string }) {
+  const path =
+    park === "either"
+      ? "/branding/either-available.png"
+      : park === "dl"
+        ? "/branding/disneyland-available.png"
+        : park === "dca"
+          ? "/branding/dca-available.png"
+          : undefined;
+
+  if (!path) return null;
+  return <img src={path} alt="" className={classNames(size, "object-contain")} />;
+}
+
+function StatusBadge({
+  status,
+  compact = false,
+}: {
+  status: StatusType;
+  compact?: boolean;
+}) {
   const meta = STATUS_META[status];
 
   return (
     <span
       className={classNames(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm",
-        meta.tone
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium",
+        meta.tone,
+        compact && "px-2.5 py-1 text-xs"
       )}
     >
-      {meta.assetPath ? (
-        <img src={meta.assetPath} alt={meta.label} className="h-4 w-4 object-contain" />
+      {meta.iconPath ? (
+        <img src={meta.iconPath} alt="" className={compact ? "h-3.5 w-3.5 object-contain" : "h-4 w-4 object-contain"} />
       ) : status === "blocked" ? (
-        <CircleOff className="h-4 w-4" />
+        <CircleOff className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
       ) : null}
-      {meta.label}
+      {compact ? meta.compactLabel : meta.label}
     </span>
   );
 }
 
-function PassIcon({ passType }: { passType: PassType }) {
-  const pass = PASS_TYPES.find((item) => item.id === passType)!;
-  return <img src={pass.iconPath} alt={pass.name} className="h-7 w-7 object-contain" />;
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[28px] border border-zinc-200 bg-white p-8 text-center shadow-sm">
+      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600">
+        <Sparkles className="h-6 w-6" />
+      </div>
+      <h3 className="text-lg font-semibold text-zinc-900">{title}</h3>
+      <p className="mt-2 text-sm text-zinc-500">{body}</p>
+    </div>
+  );
 }
 
 export default function Home() {
   const [hydrated, setHydrated] = useState(false);
+  const [hasStartedInitialSync, setHasStartedInitialSync] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("watchlist");
+
   const [passType, setPassType] = useState<PassType>("enchant");
   const [preferredPark, setPreferredPark] = useState<ParkOption>("either");
   const [syncFrequency, setSyncFrequency] = useState<FrequencyType>("1m");
+
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
+
   const [dateInput, setDateInput] = useState("");
   const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
+  const [feedRows, setFeedRows] = useState<FeedRow[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
-  const [lastCheckedAt, setLastCheckedAt] = useState(new Date().toISOString());
   const [lastSyncAt, setLastSyncAt] = useState("");
   const [lastRunSummary, setLastRunSummary] = useState("Ready to sync live Disney data.");
+  const [displayedMonth, setDisplayedMonth] = useState(currentMonthKey());
   const [toast, setToast] = useState<ToastState>(null);
-  const [editMode, setEditMode] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const syncLockRef = useRef(false);
+
+  const pushToast = useCallback((kind: "success" | "error", message: string) => {
+    setToast({ kind, message });
+    window.clearTimeout((window as Window & { __toastTimer?: number }).__toastTimer);
+    (window as Window & { __toastTimer?: number }).__toastTimer = window.setTimeout(() => {
+      setToast(null);
+    }, 3000);
+  }, []);
+
+  const prependActivity = useCallback((source: SyncSource | "system", message: string) => {
+    setActivity((current) => [
+      {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        source,
+        message,
+      },
+      ...current,
+    ].slice(0, 40));
+  }, []);
 
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
 
     if (!raw) {
-      setWatchItems([
-        {
-          id: crypto.randomUUID(),
-          date: "2026-03-20",
-          passType: "enchant",
-          preferredPark: "either",
-          currentStatus: "unavailable",
-          previousStatus: null,
-          changedAt: new Date().toISOString(),
-        },
-      ]);
+      setDisplayedMonth(currentMonthKey());
       setHydrated(true);
       return;
     }
 
     try {
       const parsed = JSON.parse(raw);
+
+      setActiveTab(parsed.activeTab ?? "watchlist");
       setPassType(parsed.passType ?? "enchant");
       setPreferredPark(parsed.preferredPark ?? "either");
       setSyncFrequency(parsed.syncFrequency ?? "1m");
       setAlertsEnabled(parsed.alertsEnabled ?? false);
       setEmailEnabled(parsed.emailEnabled ?? false);
       setEmailAddress(parsed.emailAddress ?? "");
-      setWatchItems(parsed.watchItems ?? []);
+      setFeedRows(parsed.feedRows ?? []);
       setActivity(parsed.activity ?? []);
-      setLastCheckedAt(parsed.lastCheckedAt ?? new Date().toISOString());
       setLastSyncAt(parsed.lastSyncAt ?? "");
       setLastRunSummary(parsed.lastRunSummary ?? "Ready to sync live Disney data.");
+      setDisplayedMonth(parsed.displayedMonth ?? currentMonthKey());
+
+      const nextWatchItems = Array.isArray(parsed.watchItems)
+        ? parsed.watchItems.map((item: WatchItem & { changedAt?: string }) => ({
+            ...item,
+            previousStatus: item.previousStatus ?? null,
+            currentStatus: normalizeStatus(item.currentStatus),
+            lastCheckedAt: item.lastCheckedAt ?? item.changedAt ?? parsed.lastSyncAt ?? "",
+          }))
+        : [];
+
+      setWatchItems(nextWatchItems);
     } catch {
-      // ignore broken local storage
+      setDisplayedMonth(currentMonthKey());
     }
 
     setHydrated(true);
@@ -271,6 +441,7 @@ export default function Home() {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
+        activeTab,
         passType,
         preferredPark,
         syncFrequency,
@@ -278,14 +449,15 @@ export default function Home() {
         emailEnabled,
         emailAddress,
         watchItems,
+        feedRows,
         activity,
-        lastCheckedAt,
         lastSyncAt,
         lastRunSummary,
+        displayedMonth,
       })
     );
   }, [
-    hydrated,
+    activeTab,
     passType,
     preferredPark,
     syncFrequency,
@@ -293,684 +465,800 @@ export default function Home() {
     emailEnabled,
     emailAddress,
     watchItems,
+    feedRows,
     activity,
-    lastCheckedAt,
     lastSyncAt,
     lastRunSummary,
+    displayedMonth,
+    hydrated,
   ]);
 
+  const syncFeed = useCallback(
+    async (source: SyncSource = "manual", logActivity = true) => {
+      if (syncLockRef.current) return;
+
+      syncLockRef.current = true;
+      setIsSyncing(true);
+
+      try {
+        const response = await fetch(`${ENDPOINT_URL}?t=${Date.now()}`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Sync failed with status ${response.status}`);
+        }
+
+        const rawRows = await response.json();
+        const rows: FeedRow[] = Array.isArray(rawRows) ? rawRows : [];
+        const lookup = buildFeedLookup(rows);
+        const syncedAt = new Date().toISOString();
+
+        let changedCount = 0;
+        const newlyBetter: Array<{ date: string; passType: PassType; status: StatusType }> = [];
+
+        setFeedRows(rows);
+
+        setWatchItems((current) =>
+          current.map((item) => {
+            const nextStatus = resolveStatus(item, lookup);
+            const changed = nextStatus !== item.currentStatus;
+
+            if (changed) {
+              changedCount += 1;
+
+              if (comparePriority(nextStatus) > comparePriority(item.currentStatus)) {
+                newlyBetter.push({
+                  date: item.date,
+                  passType: item.passType,
+                  status: nextStatus,
+                });
+              }
+            }
+
+            return {
+              ...item,
+              previousStatus: changed ? item.currentStatus : item.previousStatus,
+              currentStatus: nextStatus,
+              lastCheckedAt: syncedAt,
+            };
+          })
+        );
+
+        setLastSyncAt(syncedAt);
+
+        const prefix =
+          source === "manual"
+            ? "Live Disney data manually synced."
+            : source === "auto"
+              ? "Live Disney data auto-synced."
+              : "Live Disney data synced.";
+
+        const summary =
+          changedCount === 0
+            ? `${prefix} No watched dates changed.`
+            : `${prefix} ${changedCount} watched ${changedCount === 1 ? "date changed" : "dates changed"}.`;
+
+        setLastRunSummary(summary);
+
+        if (logActivity && source !== "startup") {
+          prependActivity(source, summary);
+        }
+
+        if (alertsEnabled && newlyBetter.length > 0 && canNotify() && Notification.permission === "granted") {
+          const first = newlyBetter[0];
+          const passName = PASS_TYPES.find((item) => item.id === first.passType)?.name ?? first.passType;
+          const statusLabel = STATUS_META[first.status].compactLabel;
+
+          new Notification("Magic Key update", {
+            body: `${passName} • ${formatWatchDate(first.date)} • ${statusLabel}`,
+          });
+        }
+
+        if (source === "manual") {
+          pushToast("success", "Live Disney data manually synced.");
+        }
+      } catch (error) {
+        const message = "Live Disney data sync failed.";
+        setLastRunSummary(message);
+
+        if (logActivity && source !== "startup") {
+          prependActivity("system", message);
+        }
+
+        if (source === "manual") {
+          pushToast("error", "Live sync failed.");
+        }
+      } finally {
+        syncLockRef.current = false;
+        setIsSyncing(false);
+      }
+    },
+    [alertsEnabled, prependActivity, pushToast]
+  );
+
   useEffect(() => {
-    if (!toast) return;
-    const id = window.setTimeout(() => setToast(null), 2600);
-    return () => window.clearTimeout(id);
-  }, [toast]);
+    if (!hydrated || hasStartedInitialSync) return;
+    setHasStartedInitialSync(true);
+    void syncFeed("startup", false);
+  }, [hydrated, hasStartedInitialSync, syncFeed]);
+
+  useEffect(() => {
+    if (!hydrated || syncFrequency === "manual") return;
+
+    const interval = window.setInterval(() => {
+      void syncFeed("auto", true);
+    }, POLL_MS[syncFrequency]);
+
+    return () => window.clearInterval(interval);
+  }, [hydrated, syncFrequency, syncFeed]);
 
   const summary = useMemo(() => {
     const counts = { available: 0, unavailable: 0, blocked: 0 };
-    watchItems.forEach((item) => {
+
+    for (const item of watchItems) {
       if (["either", "dl", "dca"].includes(item.currentStatus)) counts.available += 1;
       else if (item.currentStatus === "blocked") counts.blocked += 1;
       else counts.unavailable += 1;
-    });
+    }
+
     return counts;
   }, [watchItems]);
 
-  const upcomingByDate = useMemo(
-    () => [...watchItems].sort((a, b) => a.date.localeCompare(b.date)),
-    [watchItems]
-  );
+  const watchedByDate = useMemo(() => {
+    const next = new Map<string, WatchItem[]>();
 
-  async function requestNotificationsAndEnable() {
-    if (!canNotify()) {
-      pushToast("error", "Browser notifications are not available here.");
+    for (const item of watchItems) {
+      const bucket = next.get(item.date) ?? [];
+      bucket.push(item);
+      next.set(item.date, bucket);
+    }
+
+    for (const [key, value] of next.entries()) {
+      value.sort((a, b) => {
+        return (
+          a.date.localeCompare(b.date) ||
+          PASS_TYPES.findIndex((row) => row.id === a.passType) - PASS_TYPES.findIndex((row) => row.id === b.passType)
+        );
+      });
+      next.set(key, value);
+    }
+
+    return next;
+  }, [watchItems]);
+
+  const calendarRows = useMemo(() => {
+    const [year, month] = displayedMonth.split("-").map(Number);
+    const firstDay = new Date(year, month - 1, 1);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const leadingBlanks = firstDay.getDay();
+
+    const cells: Array<{ date: string; day: number } | null> = [];
+
+    for (let i = 0; i < leadingBlanks; i += 1) {
+      cells.push(null);
+    }
+
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({
+        date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+        day,
+      });
+    }
+
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
+
+    const rows: Array<Array<{ date: string; day: number } | null>> = [];
+    for (let i = 0; i < cells.length; i += 7) {
+      rows.push(cells.slice(i, i + 7));
+    }
+
+    return rows;
+  }, [displayedMonth]);
+
+  const addWatchItem = useCallback(() => {
+    if (!dateInput) {
+      pushToast("error", "Choose a date first.");
       return;
     }
-
-    if (Notification.permission === "default") {
-      const result = await Notification.requestPermission();
-      if (result !== "granted") {
-        pushToast("error", "Notification permission was not granted.");
-        return;
-      }
-    }
-
-    if (Notification.permission === "granted") {
-      setAlertsEnabled(true);
-      pushToast("success", "Notifications enabled.");
-    } else {
-      pushToast("error", "Notification permission was not granted.");
-    }
-  }
-
-  function pushToast(kind: "success" | "error", message: string) {
-    setToast({ kind, message });
-  }
-
-  function applyFeedRows(rows: any[], sourceItems: WatchItem[] = watchItems) {
-    const checkedAt = new Date().toISOString();
-    const feedLookup = new Map<string, StatusType>();
-
-    rows.forEach((row) => {
-      const date = row.date;
-      const feedPass = row.passType || row.pass || row.key;
-      const feedPark = row.preferredPark || row.park || "either";
-      const feedStatus = normalizeStatus(row.status || row.availability);
-
-      if (!date || !feedPass) return;
-      feedLookup.set(`${date}__${feedPass}__${feedPark}`, feedStatus);
-      feedLookup.set(`${date}__${feedPass}__either`, feedStatus);
-    });
-
-    const changes: Array<{ item: WatchItem; from: StatusType; to: StatusType }> = [];
-    const improved: Array<{ item: WatchItem; to: StatusType }> = [];
-
-    const updated = sourceItems.map((item) => {
-      const nextStatus =
-        feedLookup.get(`${item.date}__${item.passType}__${item.preferredPark}`) ??
-        feedLookup.get(`${item.date}__${item.passType}__either`) ??
-        item.currentStatus;
-
-      const changed = nextStatus !== item.currentStatus;
-      const gotBetter = comparePriority(nextStatus) > comparePriority(item.currentStatus);
-
-      if (changed) changes.push({ item, from: item.currentStatus, to: nextStatus });
-      if (gotBetter) improved.push({ item, to: nextStatus });
-
-      return {
-        ...item,
-        previousStatus: item.currentStatus,
-        currentStatus: nextStatus,
-        changedAt: changed ? checkedAt : item.changedAt,
-      };
-    });
-
-    setWatchItems(updated);
-    setLastCheckedAt(checkedAt);
-    setLastSyncAt(checkedAt);
-
-    const summaryLine = changes.length
-      ? `Live Disney data synced. ${changes.length} watched ${changes.length === 1 ? "date changed" : "dates changed"}.`
-      : "Live Disney data synced. No watched dates changed.";
-
-    setLastRunSummary(summaryLine);
-    setActivity((prev) =>
-      [
-        {
-          id: crypto.randomUUID(),
-          message: summaryLine,
-          createdAt: checkedAt,
-        },
-        ...changes.slice(0, 5).map((change) => ({
-          id: crypto.randomUUID(),
-          message: `${formatDate(change.item.date)} moved from ${STATUS_META[change.from].label} to ${STATUS_META[change.to].label}.`,
-          createdAt: checkedAt,
-        })),
-        ...prev,
-      ].slice(0, 12)
-    );
-
-    return { improvedCount: improved.length, changedCount: changes.length };
-  }
-
-  async function maybeNotify(improvedCount: number) {
-    if (!(alertsEnabled && improvedCount > 0)) return;
-    if (!canNotify()) return;
-    if (Notification.permission !== "granted") return;
-
-    new Notification("Magic Key Monitor", {
-      body: `${improvedCount} watched ${improvedCount === 1 ? "date has" : "dates have"} a better status now.`,
-    });
-  }
-
-  async function syncFromEndpoint(showToastMessage = true, sourceItems: WatchItem[] = watchItems) {
-    try {
-      const response = await fetch(ENDPOINT_URL, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Endpoint returned ${response.status}`);
-
-      const payload = await response.json();
-      const rows = Array.isArray(payload) ? payload : payload.items ?? [];
-      const { improvedCount, changedCount } = applyFeedRows(rows, sourceItems);
-
-      await maybeNotify(improvedCount);
-
-      if (showToastMessage) {
-        pushToast(
-          "success",
-          changedCount
-            ? `Live data synced. ${changedCount} watched ${changedCount === 1 ? "date changed" : "dates changed"}.`
-            : "Live data synced. No watched dates changed."
-        );
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to sync live data.";
-      setLastRunSummary(`Live sync failed: ${message}`);
-      if (showToastMessage) pushToast("error", `Sync failed: ${message}`);
-    }
-  }
-
-  function addDate() {
-    if (!dateInput) return;
 
     const duplicate = watchItems.some(
       (item) =>
-        item.date === dateInput &&
-        item.passType === passType &&
-        item.preferredPark === preferredPark
+        item.date === dateInput && item.passType === passType && item.preferredPark === preferredPark
     );
 
     if (duplicate) {
-      pushToast("error", "That exact watched date already exists.");
+      pushToast("error", "That watched date already exists.");
       return;
     }
+
+    const lookup = buildFeedLookup(feedRows);
+    const nextStatus = resolveStatus(
+      {
+        date: dateInput,
+        passType,
+        preferredPark,
+      },
+      lookup
+    );
 
     const nextItem: WatchItem = {
       id: crypto.randomUUID(),
       date: dateInput,
       passType,
       preferredPark,
-      currentStatus: "unavailable",
+      currentStatus: nextStatus,
       previousStatus: null,
-      changedAt: new Date().toISOString(),
+      lastCheckedAt: lastSyncAt,
     };
 
-    const nextItems = [...watchItems, nextItem];
-    setWatchItems(nextItems);
+    setWatchItems((current) => [...current, nextItem]);
+    setDisplayedMonth(monthKeyFromDate(dateInput));
     setDateInput("");
-    setActivity((prev) =>
-      [
-        {
-          id: crypto.randomUUID(),
-          message: `Added ${formatDate(nextItem.date)} for ${PASS_TYPES.find((p) => p.id === nextItem.passType)?.name}.`,
-          createdAt: new Date().toISOString(),
-        },
-        ...prev,
-      ].slice(0, 12)
-    );
+    prependActivity("system", `Added watched date: ${formatWatchDate(nextItem.date)} • ${PASS_TYPES.find((item) => item.id === passType)?.name} • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`);
+    pushToast("success", "Watched date added.");
+  }, [dateInput, watchItems, passType, preferredPark, feedRows, lastSyncAt, prependActivity, pushToast]);
 
-    void syncFromEndpoint(true, nextItems);
-  }
+  const removeWatchItem = useCallback(
+    (id: string) => {
+      const item = watchItems.find((row) => row.id === id);
+      setWatchItems((current) => current.filter((row) => row.id !== id));
 
-  function removeDate(id: string) {
-    const target = watchItems.find((item) => item.id === id);
-    setWatchItems((prev) => prev.filter((item) => item.id !== id));
-    if (target) {
-      setActivity((prev) =>
-        [
-          {
-            id: crypto.randomUUID(),
-            message: `Removed ${formatDate(target.date)} from your watchlist.`,
-            createdAt: new Date().toISOString(),
-          },
-          ...prev,
-        ].slice(0, 12)
-      );
-    }
-  }
+      if (item) {
+        prependActivity("system", `Removed watched date: ${formatWatchDate(item.date)} • ${PASS_TYPES.find((row) => row.id === item.passType)?.name}`);
+      }
+    },
+    [watchItems, prependActivity]
+  );
 
-  function updateWatchItem(
-    id: string,
-    field: "date" | "passType" | "preferredPark",
-    value: string
-  ) {
-    setWatchItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              [field]: value,
-            }
-          : item
-      )
-    );
-  }
-
-  async function handleEditButton() {
-    if (!editMode) {
-      setEditMode(true);
+  const requestNotifications = useCallback(async () => {
+    if (!canNotify()) {
+      pushToast("error", "Browser notifications are not available here.");
       return;
     }
 
-    setEditMode(false);
-    await syncFromEndpoint(true);
-  }
+    const permission = await Notification.requestPermission();
 
-  useEffect(() => {
-    if (!hydrated) return;
-    void syncFromEndpoint(false);
-  }, [hydrated]);
+    if (permission === "granted") {
+      setAlertsEnabled(true);
+      pushToast("success", "Browser notifications enabled.");
+      return;
+    }
 
-  useEffect(() => {
-    if (!hydrated || syncFrequency === "manual") return;
+    setAlertsEnabled(false);
+    pushToast("error", "Notifications were not enabled.");
+  }, [pushToast]);
 
-    const id = window.setInterval(() => {
-      void syncFromEndpoint(false);
-    }, POLL_MS[syncFrequency]);
-
-    return () => window.clearInterval(id);
-  }, [hydrated, syncFrequency, watchItems]);
+  const tabs: Array<{ id: TabKey; label: string }> = [
+    { id: "watchlist", label: "Watchlist" },
+    { id: "calendar", label: "Calendar" },
+    { id: "activity", label: "Activity" },
+    { id: "alerts", label: "Alerts" },
+  ];
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(236,72,153,0.10),_transparent_30%),radial-gradient(circle_at_right,_rgba(59,130,246,0.10),_transparent_25%),linear-gradient(to_bottom,_#fff7ed,_#ffffff_28%,_#f8fafc)] text-zinc-900">
-      {toast ? (
-        <div className="fixed right-4 top-4 z-50">
-          <div
-            className={classNames(
-              "flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm shadow-lg",
-              toast.kind === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : "border-rose-200 bg-rose-50 text-rose-800"
-            )}
-          >
-            {toast.kind === "success" ? <Check className="h-4 w-4" /> : null}
-            {toast.message}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="mx-auto max-w-7xl p-4 md:p-8">
-        <div className="mb-8 grid items-start gap-4 lg:grid-cols-[1.45fr_1fr]">
-          <section className="overflow-hidden rounded-[2rem] bg-white shadow-[0_20px_80px_-30px_rgba(88,28,135,0.35)]">
-            <div className="bg-gradient-to-r from-violet-700 via-fuchsia-600 to-sky-500 p-8 text-white">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-sm backdrop-blur">
-                <CheckCircle2 className="h-4 w-4" />
-                Personal Magic Key reservation watch
-              </div>
-
-              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-start">
-                <div>
-                  <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
-                    Reservation Watch Dashboard
-                  </h1>
+    <main className="min-h-screen bg-zinc-50 text-zinc-950">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-8 md:px-8 lg:px-10">
+        <section className="grid gap-6 lg:grid-cols-[1.35fr_0.9fr]">
+          <div className="rounded-[36px] bg-gradient-to-br from-violet-700 via-fuchsia-600 to-sky-500 p-8 text-white shadow-xl shadow-violet-200/60">
+            <div className="flex h-full flex-col justify-between gap-8">
+              <div className="max-w-2xl">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-medium backdrop-blur">
+                  <Sparkles className="h-4 w-4" />
+                  Disneyland Magic Key live tracker
                 </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                  <div className="rounded-3xl bg-white/15 p-4 backdrop-blur">
-                    <div className="text-xs uppercase tracking-[0.18em] text-white/70">
-                      Tracked dates
-                    </div>
-                    <div className="mt-2 text-3xl font-semibold">{watchItems.length}</div>
-                  </div>
-                  <div className="rounded-3xl bg-white/15 p-4 backdrop-blur">
-                    <div className="text-xs uppercase tracking-[0.18em] text-white/70">
-                      Last live sync
-                    </div>
-                    <div className="mt-2 text-sm font-medium">
-                      {lastSyncAt ? formatTimestamp(lastSyncAt) : "Not synced yet"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
-            <div className="mb-4 text-lg font-semibold">Choose Your Key</div>
-
-            <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
-              {PASS_TYPES.map((pass) => (
-                <button
-                  key={pass.id}
-                  onClick={() => setPassType(pass.id)}
-                  className={classNames(
-                    "overflow-hidden rounded-2xl border text-left transition",
-                    passType === pass.id
-                      ? "border-violet-500 bg-violet-50 shadow-sm"
-                      : "border-zinc-200 bg-white hover:bg-zinc-50"
-                  )}
-                >
-                  <div className={classNames("h-1.5 bg-gradient-to-r", pass.accent)} />
-                  <div className="flex flex-col items-center gap-2 p-3 text-center">
-                    <img src={pass.iconPath} alt={pass.name} className="h-8 w-8 object-contain" />
-                    <div className="text-sm font-medium">{pass.name}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4 space-y-2">
-              <label className="text-sm font-medium">Date</label>
-              <input
-                type="date"
-                value={dateInput}
-                onChange={(e) => setDateInput(e.target.value)}
-                className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
-              />
-            </div>
-
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Preferred park outcome</label>
-                <select
-                  value={preferredPark}
-                  onChange={(e) => setPreferredPark(e.target.value as ParkOption)}
-                  className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
-                >
-                  {PARK_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Check frequency</label>
-                <select
-                  value={syncFrequency}
-                  onChange={(e) => setSyncFrequency(e.target.value as FrequencyType)}
-                  className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
-                >
-                  {FREQUENCIES.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <button
-              onClick={addDate}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3 font-medium text-white transition hover:from-violet-700 hover:to-fuchsia-700"
-            >
-              Add watched date
-            </button>
-          </section>
-        </div>
-
-        <div className="mb-8 grid gap-4 md:grid-cols-3">
-          <div className="rounded-[2rem] bg-white p-5 shadow-[0_16px_55px_-30px_rgba(15,23,42,0.30)]">
-            <div className="text-sm text-zinc-500">Dates with availability</div>
-            <div className="mt-2 text-3xl font-semibold">{summary.available}</div>
-          </div>
-          <div className="rounded-[2rem] bg-white p-5 shadow-[0_16px_55px_-30px_rgba(15,23,42,0.30)]">
-            <div className="text-sm text-zinc-500">No reservations available</div>
-            <div className="mt-2 text-3xl font-semibold">{summary.unavailable}</div>
-          </div>
-          <div className="rounded-[2rem] bg-white p-5 shadow-[0_16px_55px_-30px_rgba(15,23,42,0.30)]">
-            <div className="text-sm text-zinc-500">Blocked out</div>
-            <div className="mt-2 text-3xl font-semibold">{summary.blocked}</div>
-          </div>
-        </div>
-
-        <div className="mb-4 flex flex-wrap gap-2 rounded-2xl bg-white/90 p-2 shadow-sm">
-          {[
-            { key: "watchlist", label: "Watchlist" },
-            { key: "calendar", label: "Calendar" },
-            { key: "activity", label: "Activity" },
-            { key: "alerts", label: "Alerts" },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key as TabKey)}
-              className={classNames(
-                "rounded-xl px-4 py-2 text-sm font-medium transition",
-                activeTab === tab.key ? "bg-violet-600 text-white" : "text-zinc-600 hover:bg-zinc-100"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {activeTab === "watchlist" && (
-          <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
-            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-lg font-semibold">
-                  <CalendarDays className="h-5 w-5 text-violet-600" />
-                  Watched dates
-                </div>
-                <p className="text-sm text-zinc-500">
-                  This screen now always syncs from your server endpoint.
+                <h1 className="mt-5 text-4xl font-bold leading-tight sm:text-5xl">
+                  Disneyland Magic Key Wishboard
+                </h1>
+                <p className="mt-4 max-w-xl text-sm text-white/90 sm:text-base">
+                  Track the dates you care about, sync Disney availability live, and keep your Magic Key watchlist clean and easy to read.
                 </p>
               </div>
 
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-[28px] bg-white/16 p-5 backdrop-blur">
+                  <div className="text-xs uppercase tracking-[0.22em] text-white/75">Tracked dates</div>
+                  <div className="mt-2 text-4xl font-semibold">{watchItems.length}</div>
+                </div>
+                <div className="rounded-[28px] bg-white/16 p-5 backdrop-blur">
+                  <div className="text-xs uppercase tracking-[0.22em] text-white/75">Last live sync</div>
+                  <div className="mt-2 text-lg font-semibold">{formatSyncTime(lastSyncAt)}</div>
+                  <div className="mt-1 text-xs text-white/75">{lastRunSummary}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[36px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="text-lg font-semibold text-zinc-900">Add watched date</div>
+            <div className="mt-5">
+              <div className="text-sm font-medium text-zinc-700">Choose Your Key</div>
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {PASS_TYPES.map((pass) => (
+                  <button
+                    key={pass.id}
+                    type="button"
+                    onClick={() => setPassType(pass.id)}
+                    className={classNames(
+                      "rounded-[22px] border px-3 py-3 text-center transition",
+                      passType === pass.id
+                        ? "border-violet-400 bg-violet-50 shadow-sm"
+                        : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50"
+                    )}
+                  >
+                    <div className="mx-auto flex h-8 w-8 items-center justify-center">
+                      <img src={pass.iconPath} alt={pass.name} className="h-7 w-7 object-contain" />
+                    </div>
+                    <div className="mt-2 text-sm font-medium text-zinc-900">{pass.short}</div>
+                    <div className="text-xs text-zinc-500">Key</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-5">
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-zinc-700">Date</span>
+                <input
+                  type="date"
+                  value={dateInput}
+                  onChange={(event) => setDateInput(event.target.value)}
+                  className="h-12 rounded-2xl border border-zinc-200 bg-white px-4 text-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                />
+              </label>
+
+              <div className="grid gap-2">
+                <div className="text-sm font-medium text-zinc-700">Preferred Park</div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {PARK_OPTIONS.map((park) => (
+                    <button
+                      key={park.value}
+                      type="button"
+                      onClick={() => setPreferredPark(park.value)}
+                      className={classNames(
+                        "flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                        preferredPark === park.value
+                          ? "border-violet-400 bg-violet-50 text-violet-900 shadow-sm"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50"
+                      )}
+                    >
+                      <img src={park.iconPath} alt="" className="h-4 w-4 object-contain" />
+                      {park.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-zinc-700">Check frequency</span>
+                <select
+                  value={syncFrequency}
+                  onChange={(event) => setSyncFrequency(event.target.value as FrequencyType)}
+                  className="h-12 rounded-2xl border border-zinc-200 bg-white px-4 text-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                >
+                  {FREQUENCIES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                onClick={addWatchItem}
+                className="h-12 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:opacity-95"
+              >
+                Add watched date
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="text-sm text-zinc-500">Dates with availability</div>
+            <div className="mt-2 text-4xl font-semibold">{summary.available}</div>
+          </div>
+          <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="text-sm text-zinc-500">No reservations available</div>
+            <div className="mt-2 text-4xl font-semibold">{summary.unavailable}</div>
+          </div>
+          <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="text-sm text-zinc-500">Blocked out</div>
+            <div className="mt-2 text-4xl font-semibold">{summary.blocked}</div>
+          </div>
+        </section>
+
+        <section className="rounded-[28px] border border-zinc-200 bg-white p-2 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={classNames(
+                  "rounded-2xl px-5 py-3 text-sm font-medium transition",
+                  activeTab === tab.id
+                    ? "bg-violet-600 text-white shadow"
+                    : "text-zinc-600 hover:bg-zinc-100"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {activeTab === "watchlist" && (
+          <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-2xl font-semibold text-zinc-900">
+                  <CalendarDays className="h-6 w-6 text-violet-600" />
+                  Watched dates
+                </div>
+                <p className="mt-2 text-sm text-zinc-500">
+                  Successful sync times now drive the dashboard timestamp and every card timestamp below.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={requestNotificationsAndEnable}
-                  className={classNames(
-                    "flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
-                    alertsEnabled
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-zinc-200 hover:bg-zinc-50"
-                  )}
+                  type="button"
+                  onClick={requestNotifications}
+                  className="inline-flex h-11 items-center gap-2 rounded-2xl border border-zinc-200 px-4 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                 >
                   <Bell className="h-4 w-4" />
-                  {alertsEnabled ? "Notifications enabled" : "Enable notifications"}
+                  Enable notifications
                 </button>
 
                 <button
-                  onClick={handleEditButton}
-                  className={classNames(
-                    "flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
-                    editMode
-                      ? "border-amber-200 bg-amber-50 text-amber-800"
-                      : "border-zinc-200 hover:bg-zinc-50"
-                  )}
+                  type="button"
+                  onClick={() => void syncFeed("manual", true)}
+                  disabled={isSyncing}
+                  className="inline-flex h-11 items-center gap-2 rounded-2xl bg-violet-600 px-4 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {editMode ? <Save className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                  {editMode ? "Save changes" : "Edit watchlist"}
-                </button>
-
-                <button
-                  onClick={() => void syncFromEndpoint(true)}
-                  className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3 text-sm font-medium text-white transition hover:from-violet-700 hover:to-fuchsia-700"
-                >
-                  <RefreshCcw className="h-4 w-4" />
-                  Sync live data
+                  <RefreshCcw className={classNames("h-4 w-4", isSyncing && "animate-spin")} />
+                  {isSyncing ? "Syncing..." : "Sync live data"}
                 </button>
               </div>
             </div>
 
-            <div className="mb-5 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-800">
+            <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-900">
               {lastRunSummary}
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {upcomingByDate.map((item) => {
-                const pass = PASS_TYPES.find((row) => row.id === item.passType)!;
-                const parkLabel = PARK_OPTIONS.find((row) => row.value === item.preferredPark)?.label;
+            <div className="mt-6">
+              {watchItems.length === 0 ? (
+                <EmptyState
+                  title="No watched dates yet"
+                  body="Add your first date above and the dashboard will stay empty by default until you choose something to watch."
+                />
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {watchItems
+                    .slice()
+                    .sort((a, b) => a.date.localeCompare(b.date))
+                    .map((item) => {
+                      const pass = PASS_TYPES.find((row) => row.id === item.passType)!;
+                      const park = PARK_OPTIONS.find((row) => row.value === item.preferredPark)!;
 
-                return (
-                  <div key={item.id} className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white">
-                    <div className={classNames("h-2 bg-gradient-to-r", pass.accent)} />
-                    <div className="p-5">
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <PassIcon passType={item.passType} />
-                          <div className="font-medium">{pass.name}</div>
-                        </div>
+                      return (
+                        <article
+                          key={item.id}
+                          className="overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-sm"
+                        >
+                          <div className={classNames("h-2 bg-gradient-to-r", pass.accent)} />
+                          <div className="p-5">
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <div className="flex items-center gap-2 text-sm font-medium text-zinc-600">
+                                  <PassIcon passType={item.passType} />
+                                  {pass.name}
+                                </div>
+                                <div className="mt-3 text-3xl font-semibold text-zinc-950">
+                                  {formatWatchDate(item.date)}
+                                </div>
+                              </div>
 
-                        {editMode ? (
-                          <button
-                            onClick={() => removeDate(item.id)}
-                            className="rounded-xl border border-zinc-200 p-2 text-zinc-500 transition hover:bg-zinc-50"
-                            aria-label={`Remove ${item.date}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        ) : null}
-                      </div>
+                              <button
+                                type="button"
+                                onClick={() => removeWatchItem(item.id)}
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 text-zinc-500 transition hover:bg-zinc-50 hover:text-zinc-900"
+                                aria-label="Remove watched date"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
 
-                      {editMode ? (
-                        <div className="space-y-3">
-                          <input
-                            type="date"
-                            value={item.date}
-                            onChange={(e) => updateWatchItem(item.id, "date", e.target.value)}
-                            className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
-                          />
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <StatusBadge status={item.currentStatus} />
+                            </div>
 
-                          <select
-                            value={item.passType}
-                            onChange={(e) => updateWatchItem(item.id, "passType", e.target.value)}
-                            className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
-                          >
-                            {PASS_TYPES.map((option) => (
-                              <option key={option.id} value={option.id}>
-                                {option.name}
-                              </option>
-                            ))}
-                          </select>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700">
+                                <ParkIcon park={item.preferredPark} />
+                                {park.label}
+                              </span>
+                              <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700">
+                                <Clock3 className="h-4 w-4" />
+                                {FREQUENCIES.find((row) => row.value === syncFrequency)?.label}
+                              </span>
+                            </div>
 
-                          <select
-                            value={item.preferredPark}
-                            onChange={(e) => updateWatchItem(item.id, "preferredPark", e.target.value)}
-                            className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
-                          >
-                            {PARK_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="mb-3 text-lg font-semibold">{formatDate(item.date)}</div>
-
-                          <StatusBadge status={item.currentStatus} />
-
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600">
-                              {parkLabel}
-                            </span>
-                            <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600">
-                              {FREQUENCIES.find((f) => f.value === syncFrequency)?.label}
-                            </span>
+                            <div className="mt-5 text-sm text-zinc-500">
+                              Last updated: {formatSyncTime(item.lastCheckedAt || lastSyncAt)}
+                            </div>
                           </div>
-
-                          <div className="mt-4 text-sm text-zinc-500">
-                            Last updated: {formatTimestamp(item.changedAt)}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                        </article>
+                      );
+                    })}
+                </div>
+              )}
             </div>
           </section>
         )}
 
         {activeTab === "calendar" && (
-          <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
-            <div className="mb-2 flex items-center gap-2 text-lg font-semibold">
-              <Clock3 className="h-5 w-5 text-violet-600" />
-              Calendar board
+          <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-2xl font-semibold text-zinc-900">
+                  <Clock3 className="h-6 w-6 text-violet-600" />
+                  Calendar board
+                </div>
+                <p className="mt-2 text-sm text-zinc-500">
+                  Real calendar layout with month label, weekday headers, watched park, pass icon, and current live status.
+                </p>
+              </div>
+
+              <div className="inline-flex items-center gap-2 self-start rounded-2xl border border-zinc-200 bg-zinc-50 p-2">
+                <button
+                  type="button"
+                  onClick={() => setDisplayedMonth(previousMonthKey(displayedMonth))}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-white"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div className="min-w-[180px] px-3 text-center text-sm font-semibold text-zinc-900">
+                  {formatMonthLabel(displayedMonth)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDisplayedMonth(nextMonthKey(displayedMonth))}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-white"
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-              {Array.from({ length: 31 }, (_, index) => {
-                const day = index + 1;
-                const date = `2026-03-${String(day).padStart(2, "0")}`;
-                const watched = watchItems.find((item) => item.date === date);
+            <div className="mt-6 grid grid-cols-7 gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                <div key={label} className="px-2 py-1">
+                  {label}
+                </div>
+              ))}
+            </div>
 
-                return (
-                  <div
-                    key={date}
-                    className={classNames(
-                      "rounded-[1.5rem] border p-4",
-                      watched ? "border-violet-400 bg-violet-50/70" : "border-zinc-200 bg-white"
-                    )}
-                  >
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="text-sm font-medium">{day}</div>
-                      {watched ? (
-                        <span className="rounded-full bg-violet-600 px-2 py-1 text-[10px] text-white">
-                          Watching
-                        </span>
-                      ) : null}
-                    </div>
-                    {watched ? (
-                      <StatusBadge status={watched.currentStatus} />
-                    ) : (
-                      <span className="text-xs text-zinc-400">Not watched</span>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="mt-3 grid gap-3">
+              {calendarRows.map((row, rowIndex) => (
+                <div key={rowIndex} className="grid grid-cols-7 gap-3">
+                  {row.map((cell, cellIndex) => {
+                    if (!cell) {
+                      return (
+                        <div
+                          key={`${rowIndex}-${cellIndex}`}
+                          className="min-h-[150px] rounded-[24px] border border-transparent"
+                        />
+                      );
+                    }
+
+                    const items = watchedByDate.get(cell.date) ?? [];
+
+                    return (
+                      <div
+                        key={cell.date}
+                        className={classNames(
+                          "min-h-[150px] rounded-[24px] border p-3 shadow-sm transition",
+                          items.length > 0
+                            ? "border-violet-300 bg-violet-50/50"
+                            : "border-zinc-200 bg-white"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-lg font-semibold text-zinc-900">{cell.day}</div>
+                          {items.length > 0 && (
+                            <span className="rounded-full bg-violet-600 px-2.5 py-1 text-[11px] font-semibold text-white">
+                              Watching
+                            </span>
+                          )}
+                        </div>
+
+                        {items.length === 0 ? (
+                          <div className="mt-6 text-sm text-zinc-400">Not watched</div>
+                        ) : (
+                          <div className="mt-3 space-y-2">
+                            {items.slice(0, 2).map((item) => {
+                              const pass = PASS_TYPES.find((row) => row.id === item.passType)!;
+                              const park = PARK_OPTIONS.find((row) => row.value === item.preferredPark)!;
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  className="rounded-2xl border border-white/70 bg-white/80 p-2.5 shadow-sm"
+                                >
+                                  <div className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+                                    <PassIcon passType={item.passType} size="h-4 w-4" />
+                                    <span>{pass.short}</span>
+                                  </div>
+
+                                  <div className="mt-2">
+                                    <StatusBadge status={item.currentStatus} compact />
+                                  </div>
+
+                                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-700">
+                                    <img src={park.iconPath} alt="" className="h-3.5 w-3.5 object-contain" />
+                                    {park.label}
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {items.length > 2 && (
+                              <div className="text-xs text-zinc-500">+{items.length - 2} more watched items</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </section>
         )}
 
         {activeTab === "activity" && (
-          <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
-            <div className="mb-2 text-lg font-semibold">Sync history</div>
+          <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-2 text-2xl font-semibold text-zinc-900">
+              <RefreshCcw className="h-6 w-6 text-violet-600" />
+              Sync history
+            </div>
+            <p className="mt-2 text-sm text-zinc-500">
+              Manual and automatic syncs are labeled differently so the history is easier to read.
+            </p>
 
-            <div className="space-y-3">
+            <div className="mt-6">
               {activity.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-zinc-200 p-6 text-sm text-zinc-500">
-                  No activity yet.
-                </div>
+                <EmptyState
+                  title="No sync activity yet"
+                  body="Your sync history will appear here after you manually sync or after an automatic interval runs."
+                />
               ) : (
-                activity.map((entry) => (
-                  <div key={entry.id} className="rounded-2xl border border-zinc-200 px-4 py-3">
-                    <div className="text-sm font-medium">{entry.message}</div>
-                    <div className="mt-1 text-xs text-zinc-500">{formatTimestamp(entry.createdAt)}</div>
-                  </div>
-                ))
+                <div className="space-y-3">
+                  {activity.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex flex-col gap-2 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={classNames(
+                              "rounded-full px-2.5 py-1 text-xs font-semibold",
+                              item.source === "manual"
+                                ? "bg-violet-100 text-violet-800"
+                                : item.source === "auto"
+                                  ? "bg-sky-100 text-sky-800"
+                                  : "bg-zinc-200 text-zinc-700"
+                            )}
+                          >
+                            {item.source === "manual"
+                              ? "Manual sync"
+                              : item.source === "auto"
+                                ? "Auto sync"
+                                : item.source === "startup"
+                                  ? "Startup sync"
+                                  : "System"}
+                          </span>
+                          <span className="text-xs text-zinc-500">{formatActivityTime(item.createdAt)}</span>
+                        </div>
+                        <div className="mt-2 text-sm text-zinc-800">{item.message}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </section>
         )}
 
         {activeTab === "alerts" && (
-          <section className="rounded-[2rem] bg-white p-6 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.35)]">
-            <div className="mb-2 text-lg font-semibold">Alerts</div>
+          <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-2 text-2xl font-semibold text-zinc-900">
+              <Bell className="h-6 w-6 text-violet-600" />
+              Alerts & saved preferences
+            </div>
+            <p className="mt-2 text-sm text-zinc-500">
+              These settings are saved in your browser so you do not need to re-enter them every time.
+            </p>
 
-            <div className="space-y-5">
-              <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-4 py-3">
-                <div>
-                  <div className="flex items-center gap-2 font-medium">
-                    <Bell className="h-4 w-4 text-violet-600" />
-                    Browser notifications
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-[28px] border border-zinc-200 bg-zinc-50 p-5">
+                <div className="text-sm font-semibold text-zinc-900">Browser notifications</div>
+                <p className="mt-2 text-sm text-zinc-500">
+                  Get alerts when a watched date improves.
+                </p>
+                <div className="mt-4 flex items-center justify-between gap-4">
+                  <div className="text-sm text-zinc-700">
+                    {alertsEnabled ? "Enabled" : "Disabled"}
                   </div>
-                  <div className="text-sm text-zinc-500">
-                    Notify me when a watched date gets a better status while this page is in use.
-                  </div>
+                  <button
+                    type="button"
+                    onClick={requestNotifications}
+                    className="inline-flex h-11 items-center gap-2 rounded-2xl bg-violet-600 px-4 text-sm font-semibold text-white"
+                  >
+                    <Bell className="h-4 w-4" />
+                    Turn on
+                  </button>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={alertsEnabled}
-                  onChange={(e) => setAlertsEnabled(e.target.checked)}
-                  className="h-5 w-5"
-                />
               </div>
 
-              <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-4 py-3">
-                <div>
-                  <div className="flex items-center gap-2 font-medium">
-                    <Mail className="h-4 w-4 text-violet-600" />
-                    Email alerts placeholder
-                  </div>
-                  <div className="text-sm text-zinc-500">
-                    Automatic email delivery is not on yet.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={emailEnabled}
-                  onChange={(e) => setEmailEnabled(e.target.checked)}
-                  className="h-5 w-5"
-                />
-              </div>
+              <div className="rounded-[28px] border border-zinc-200 bg-zinc-50 p-5">
+                <div className="text-sm font-semibold text-zinc-900">Email preference</div>
+                <p className="mt-2 text-sm text-zinc-500">
+                  Saved locally in this browser for now.
+                </p>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Email address</label>
-                <input
-                  type="email"
-                  value={emailAddress}
-                  onChange={(e) => setEmailAddress(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full rounded-2xl border border-zinc-200 px-4 py-3 outline-none focus:border-violet-500"
-                />
+                <label className="mt-4 flex items-center gap-3 text-sm text-zinc-700">
+                  <input
+                    type="checkbox"
+                    checked={emailEnabled}
+                    onChange={(event) => setEmailEnabled(event.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-300 text-violet-600"
+                  />
+                  Keep email alerts enabled
+                </label>
+
+                <label className="mt-4 grid gap-2">
+                  <span className="text-sm text-zinc-700">Email address</span>
+                  <div className="relative">
+                    <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="email"
+                      value={emailAddress}
+                      onChange={(event) => setEmailAddress(event.target.value)}
+                      placeholder="name@example.com"
+                      className="h-12 w-full rounded-2xl border border-zinc-200 bg-white pl-10 pr-4 text-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                    />
+                  </div>
+                </label>
               </div>
             </div>
           </section>
         )}
       </div>
-    </div>
+
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-50">
+          <div
+            className={classNames(
+              "rounded-2xl border px-4 py-3 text-sm font-medium shadow-lg",
+              toast.kind === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-rose-200 bg-rose-50 text-rose-800"
+            )}
+          >
+            {toast.message}
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
