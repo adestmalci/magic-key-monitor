@@ -16,3 +16,7 @@
 - 2026-03-12: Confirmed `data/magic-key-feed.json` already exists and uses the app feed row shape.
 - 2026-03-12: Confirmed `app/page.tsx` matches feed rows by `date`, `passType`, and `preferredPark`.
 - 2026-03-12: Next step is mapping Disney endpoint JSON into that feed format with a generator script.
+
+
+- 2026-03-12: Added `scripts/generate-magic-key-feed.mjs` to build `data/magic-key-feed.json` from Disney's direct JSON endpoints.
+- 2026-03-12: Confirmed the app route already serves `data/magic-key-feed.json`, so the generator is the main missing piece in the data flow.
