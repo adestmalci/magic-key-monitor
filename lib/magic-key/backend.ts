@@ -1,8 +1,7 @@
 import { cookies } from "next/headers";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { normalizeSupportedFrequency } from "./config";
+import { getDataPath, readStoredValue, writeStoredValue } from "./storage";
 import { buildFeedLookup, resolveStatus } from "./utils";
 import type {
   DashboardUserState,
@@ -69,9 +68,8 @@ export type AlertChange = {
   currentStatus: StoredWatchItem["currentStatus"];
 };
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const STATE_PATH = path.join(DATA_DIR, "magic-key-backend.json");
-const FEED_PATH = path.join(DATA_DIR, "magic-key-feed.json");
+const STATE_PATH = getDataPath("magic-key-backend.json");
+const FEED_PATH = getDataPath("magic-key-feed.json");
 const SESSION_COOKIE = "magic_key_session";
 
 const DEFAULT_SYNC_META: SyncMeta = {
@@ -148,19 +146,19 @@ function hashValue(value: string) {
 }
 
 export async function ensureBackendState() {
-  await mkdir(DATA_DIR, { recursive: true });
-
-  try {
-    await readFile(STATE_PATH, "utf8");
-  } catch {
-    await writeFile(STATE_PATH, JSON.stringify(defaultState(), null, 2) + "\n", "utf8");
-  }
+  await readStoredValue({
+    storageKey: "backend-state",
+    localPath: STATE_PATH,
+    createDefault: defaultState,
+  });
 }
 
 export async function readBackendState(): Promise<BackendState> {
-  await ensureBackendState();
-  const raw = await readFile(STATE_PATH, "utf8");
-  const parsed = JSON.parse(raw) as Partial<BackendState>;
+  const parsed = (await readStoredValue<Partial<BackendState>>({
+    storageKey: "backend-state",
+    localPath: STATE_PATH,
+    createDefault: defaultState,
+  })) as Partial<BackendState>;
 
   return {
     ...defaultState(),
@@ -178,19 +176,28 @@ export async function readBackendState(): Promise<BackendState> {
 }
 
 export async function writeBackendState(state: BackendState) {
-  await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(STATE_PATH, JSON.stringify(state, null, 2) + "\n", "utf8");
+  await writeStoredValue({
+    storageKey: "backend-state",
+    localPath: STATE_PATH,
+    value: state,
+  });
 }
 
 export async function readStoredFeed(): Promise<FeedRow[]> {
-  const raw = await readFile(FEED_PATH, "utf8");
-  const parsed = JSON.parse(raw);
+  const parsed = await readStoredValue<unknown>({
+    storageKey: "feed",
+    localPath: FEED_PATH,
+    createDefault: () => [],
+  });
   return Array.isArray(parsed) ? parsed : [];
 }
 
 export async function writeStoredFeed(rows: FeedRow[]) {
-  await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(FEED_PATH, JSON.stringify(rows, null, 2) + "\n", "utf8");
+  await writeStoredValue({
+    storageKey: "feed",
+    localPath: FEED_PATH,
+    value: rows,
+  });
 }
 
 export function frequencyToMs(frequency: FrequencyType) {

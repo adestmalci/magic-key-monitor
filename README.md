@@ -13,6 +13,29 @@ Add these GitHub repository secrets before enabling the workflow:
 
 The workflow file lives at [`.github/workflows/sync-magic-key.yml`](./.github/workflows/sync-magic-key.yml).
 
+## Hosted Storage Setup
+
+For local development, the app falls back to the JSON files in `data/`.
+
+For hosted deployments like Vercel, use Supabase so background syncs and account state are not written to the read-only deployment filesystem.
+
+1. Create a Supabase project.
+2. Run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL editor.
+3. Add these environment variables to Vercel:
+   - `SUPABASE_URL`
+     - Your Supabase project URL
+   - `SUPABASE_SERVICE_ROLE_KEY`
+     - The service role key from Supabase project settings
+   - `SUPABASE_STORAGE_TABLE`
+     - Optional, defaults to `magic_key_store`
+
+The hosted store keeps two JSON blobs:
+
+- `backend-state`
+  - users, preferences, watchlist, magic links, push subscriptions, sync metadata
+- `feed`
+  - the latest normalized Magic Key feed rows
+
 ## Getting Started
 
 First, run the development server:
