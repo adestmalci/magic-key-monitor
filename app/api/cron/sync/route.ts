@@ -17,13 +17,26 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { rows, syncMeta } = await syncLiveFeed();
-  const evaluation = await evaluateWatchItemsAgainstFeed(rows);
-  await sendAlertsForChanges(evaluation.state, evaluation.changesByUser);
+  try {
+    const { rows, syncMeta } = await syncLiveFeed();
+    const evaluation = await evaluateWatchItemsAgainstFeed(rows);
+    await sendAlertsForChanges(evaluation.state, evaluation.changesByUser);
 
-  return Response.json({
-    ok: true,
-    syncMeta,
-    changedUsers: evaluation.changesByUser.size,
-  });
+    return Response.json({
+      ok: true,
+      syncMeta,
+      changedUsers: evaluation.changesByUser.size,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown cron sync failure.";
+    console.error("Cron sync failed:", error);
+
+    return Response.json(
+      {
+        ok: false,
+        error: message,
+      },
+      { status: 500 }
+    );
+  }
 }
