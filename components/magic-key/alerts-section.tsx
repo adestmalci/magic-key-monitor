@@ -20,6 +20,7 @@ export function AlertsSection({
   pushConfigured,
   isSendingTestEmail,
   isSendingTestPush,
+  accountSaveStatus,
   onEmailEnabledChange,
   onEmailAddressChange,
   requestNotifications,
@@ -42,6 +43,10 @@ export function AlertsSection({
   pushConfigured: boolean;
   isSendingTestEmail: boolean;
   isSendingTestPush: boolean;
+  accountSaveStatus: {
+    state: "local" | "saving" | "saved" | "error";
+    message: string;
+  };
   onEmailEnabledChange: (value: boolean) => void;
   onEmailAddressChange: (value: string) => void;
   requestNotifications: () => void | Promise<void>;
@@ -60,6 +65,21 @@ export function AlertsSection({
       <p className="mt-2 max-w-3xl text-sm text-zinc-500">
         Keep your sign-in, browser notifications, email alerts, and background push setup in one simple place.
       </p>
+
+      <div
+        className={classNames(
+          "mt-4 inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium",
+          accountSaveStatus.state === "error"
+            ? "border-rose-200 bg-rose-50 text-rose-800"
+            : accountSaveStatus.state === "saved"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : accountSaveStatus.state === "saving"
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-zinc-200 bg-white text-zinc-700"
+        )}
+      >
+        {accountSaveStatus.message}
+      </div>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="grid gap-4">

@@ -12,6 +12,8 @@ export function WatchlistSection({
   isSyncing,
   syncFrequency,
   lastSyncAt,
+  sessionEmail,
+  saveStatus,
   onManualSync,
   onRemoveWatchItem,
 }: {
@@ -20,6 +22,11 @@ export function WatchlistSection({
   isSyncing: boolean;
   syncFrequency: FrequencyType;
   lastSyncAt: string;
+  sessionEmail: string | null;
+  saveStatus: {
+    state: "local" | "saving" | "saved" | "error";
+    message: string;
+  };
   onManualSync: () => void;
   onRemoveWatchItem: (id: string) => void;
 }) {
@@ -36,6 +43,33 @@ export function WatchlistSection({
           <p className="mt-2 text-sm text-zinc-500">
             Keep your wishboard tidy here, then run a live sync whenever you want a fresh Disney check.
           </p>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <div
+              className={classNames(
+                "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium",
+                sessionEmail
+                  ? "border-violet-200 bg-violet-50 text-violet-900"
+                  : "border-zinc-200 bg-white text-zinc-700"
+              )}
+            >
+              {sessionEmail ? `Saved to ${sessionEmail}` : "Local to this browser"}
+            </div>
+            <div
+              className={classNames(
+                "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium",
+                saveStatus.state === "error"
+                  ? "border-rose-200 bg-rose-50 text-rose-800"
+                  : saveStatus.state === "saved"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : saveStatus.state === "saving"
+                      ? "border-amber-200 bg-amber-50 text-amber-800"
+                      : "border-zinc-200 bg-white text-zinc-700"
+              )}
+            >
+              {saveStatus.message}
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-3">

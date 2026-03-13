@@ -1,9 +1,10 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
-import { PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
-import type { WatchItem } from "../../lib/magic-key/types";
-import { formatMonthLabel, type CalendarCell } from "../../lib/magic-key/utils";
+import { useState } from "react";
+import { FREQUENCIES, PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
+import type { FrequencyType, ParkOption, PassType, WatchItem } from "../../lib/magic-key/types";
+import { classNames, formatMonthLabel, type CalendarCell } from "../../lib/magic-key/utils";
 import { PassIcon, ParkIcon } from "./icons";
 import { StatusBadge } from "./status-badge";
 
@@ -11,15 +12,40 @@ export function CalendarSection({
   displayedMonth,
   calendarRows,
   watchedByDate,
+  defaultPassType,
+  defaultPreferredPark,
+  defaultSyncFrequency,
+  onQuickWatch,
   onPreviousMonth,
   onNextMonth,
 }: {
   displayedMonth: string;
   calendarRows: Array<Array<CalendarCell | null>>;
   watchedByDate: Map<string, WatchItem[]>;
+  defaultPassType: PassType;
+  defaultPreferredPark: ParkOption;
+  defaultSyncFrequency: FrequencyType;
+  onQuickWatch: (payload: {
+    date: string;
+    passType: PassType;
+    preferredPark: ParkOption;
+    syncFrequency: FrequencyType;
+  }) => void;
   onPreviousMonth: () => void;
   onNextMonth: () => void;
 }) {
+  const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  const [quickPassType, setQuickPassType] = useState<PassType>(defaultPassType);
+  const [quickPreferredPark, setQuickPreferredPark] = useState<ParkOption>(defaultPreferredPark);
+  const [quickSyncFrequency, setQuickSyncFrequency] = useState<FrequencyType>(defaultSyncFrequency);
+
+  function openQuickWatch(date: string) {
+    setExpandedDate((current) => (current === date ? null : date));
+    setQuickPassType(defaultPassType);
+    setQuickPreferredPark(defaultPreferredPark);
+    setQuickSyncFrequency(defaultSyncFrequency);
+  }
+
   return (
     <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -81,6 +107,7 @@ export function CalendarSection({
               }
 
               const items = watchedByDate.get(cell.date) ?? [];
+              const isExpanded = expandedDate === cell.date;
 
               return (
                 <div
@@ -102,7 +129,108 @@ export function CalendarSection({
                   </div>
 
                   {items.length === 0 ? (
-                    <div className="mt-6 text-sm text-zinc-400">Not watched</div>
+                    <div className="mt-6">
+                      <div className="text-sm text-zinc-400">Not watched</div>
+                      <button
+                        type="button"
+                        onClick={() => openQuickWatch(cell.date)}
+                        className="mt-3 inline-flex h-9 items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 px-4 text-sm font-medium text-violet-900 transition hover:bg-violet-100"
+                      >
+                        Watch
+                      </button>
+
+                      {isExpanded ? (
+                        <div className="mt-3 rounded-[22px] border border-violet-200 bg-violet-50/60 p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                            Choose your key
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            {PASS_TYPES.map((pass) => (
+                              <button
+                                key={pass.id}
+                                type="button"
+                                onClick={() => setQuickPassType(pass.id)}
+                                className={classNames(
+                                  "rounded-2xl border px-2 py-2 text-center transition",
+                                  quickPassType === pass.id
+                                    ? "border-violet-400 bg-white shadow-sm"
+                                    : "border-white/80 bg-white/70 hover:border-violet-200"
+                                )}
+                              >
+                                <div className="mx-auto flex h-7 w-7 items-center justify-center">
+                                  <PassIcon passType={pass.id} size="h-6 w-6" />
+                                </div>
+                                <div className="mt-1 text-[11px] font-medium text-zinc-800">{pass.short}</div>
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                            Preferred park
+                          </div>
+                          <div className="mt-2 grid grid-cols-3 gap-2">
+                            {PARK_OPTIONS.map((park) => (
+                              <button
+                                key={park.value}
+                                type="button"
+                                onClick={() => setQuickPreferredPark(park.value)}
+                                className={classNames(
+                                  "flex flex-col items-center justify-center rounded-2xl border px-2 py-2 text-center transition",
+                                  quickPreferredPark === park.value
+                                    ? "border-violet-400 bg-white shadow-sm"
+                                    : "border-white/80 bg-white/70 hover:border-violet-200"
+                                )}
+                              >
+                                <ParkIcon park={park.value} size="h-4 w-4" />
+                                <span className="mt-1 text-[10px] font-medium text-zinc-700">{park.label}</span>
+                              </button>
+                            ))}
+                          </div>
+
+                          <label className="mt-3 grid gap-1.5">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                              Check frequency
+                            </span>
+                            <select
+                              value={quickSyncFrequency}
+                              onChange={(event) => setQuickSyncFrequency(event.target.value as FrequencyType)}
+                              className="h-10 rounded-2xl border border-white/80 bg-white px-3 text-sm text-zinc-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                            >
+                              {FREQUENCIES.map((item) => (
+                                <option key={item.value} value={item.value}>
+                                  {item.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExpandedDate(null);
+                                onQuickWatch({
+                                  date: cell.date,
+                                  passType: quickPassType,
+                                  preferredPark: quickPreferredPark,
+                                  syncFrequency: quickSyncFrequency,
+                                });
+                              }}
+                              className="inline-flex h-9 flex-1 items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 text-sm font-semibold text-white shadow-md shadow-violet-200"
+                            >
+                              Save watch
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedDate(null)}
+                              className="inline-flex h-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700"
+                            >
+                              Close
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : (
                     <div className="mt-3 space-y-2">
                       {items.slice(0, 2).map((item) => {

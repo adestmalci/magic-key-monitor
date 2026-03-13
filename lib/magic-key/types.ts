@@ -28,6 +28,7 @@ export type ActivityItem = {
   createdAt: string;
   source: SyncSource | "system";
   message: string;
+  details?: string[];
 };
 
 export type ToastState = {

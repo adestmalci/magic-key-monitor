@@ -71,6 +71,8 @@ export default function Home() {
   const [pushPublicKey, setPushPublicKey] = useState("");
   const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
   const [isSendingTestPush, setIsSendingTestPush] = useState(false);
+  const [accountSaveState, setAccountSaveState] = useState<"local" | "saving" | "saved" | "error">("local");
+  const [accountSaveMessage, setAccountSaveMessage] = useState("This wishboard is currently local to this browser.");
 
   const [dateInput, setDateInput] = useState("");
   const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
@@ -87,6 +89,7 @@ export default function Home() {
   const syncLockRef = useRef(false);
   const watchItemsRef = useRef<WatchItem[]>([]);
   const importedLocalRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     watchItemsRef.current = watchItems;
@@ -100,7 +103,7 @@ export default function Home() {
     }, 3500);
   }, []);
 
-  const prependActivity = useCallback((source: SyncSource | "system", message: string) => {
+  const prependActivity = useCallback((source: SyncSource | "system", message: string, details?: string[]) => {
     setActivity((current) =>
       [
         {
@@ -108,6 +111,7 @@ export default function Home() {
           createdAt: new Date().toISOString(),
           source,
           message,
+          details,
         },
         ...current,
       ].slice(0, 40)
@@ -132,6 +136,11 @@ export default function Home() {
       setSyncFrequency(data.preferences.syncFrequency);
       setAuthEmail(data.user.email);
       setWatchItems(data.watchItems);
+      setAccountSaveState("saved");
+      setAccountSaveMessage(`Account settings are synced for ${data.user.email}.`);
+    } else {
+      setAccountSaveState("local");
+      setAccountSaveMessage("This wishboard is currently local to this browser.");
     }
   }, []);
 
@@ -280,17 +289,46 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated || !hasLoadedServerState || !sessionUser) return;
 
-    void fetch("/api/preferences", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        emailEnabled,
-        emailAddress,
-        alertsEnabled,
-        pushEnabled,
-        syncFrequency,
-      }),
-    });
+    setAccountSaveState("saving");
+    setAccountSaveMessage(`Saving account preferences for ${sessionUser.email}...`);
+
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      void fetch("/api/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emailEnabled,
+          emailAddress,
+          alertsEnabled,
+          pushEnabled,
+          syncFrequency,
+        }),
+      })
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.error || "We couldn't save your account settings.");
+          }
+
+          setAccountSaveState("saved");
+          setAccountSaveMessage(`Account settings are synced for ${sessionUser.email}.`);
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "We couldn't save your account settings.";
+          setAccountSaveState("error");
+          setAccountSaveMessage(message);
+        });
+    }, 300);
+
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    };
   }, [hydrated, hasLoadedServerState, sessionUser, emailEnabled, emailAddress, alertsEnabled, pushEnabled, syncFrequency]);
 
   const syncFeed = useCallback(
@@ -317,7 +355,12 @@ export default function Home() {
         const syncedAt = nextMeta.lastSuccessfulSyncAt || lastSyncAt;
 
         let changedCount = 0;
-        const changedItems: Array<{ date: string; passType: PassType; status: StatusType }> = [];
+        const changedItems: Array<{
+          date: string;
+          passType: PassType;
+          status: StatusType;
+          previousStatus: StatusType;
+        }> = [];
 
         setFeedRows(rows);
         setSyncMeta((current) => ({
@@ -337,6 +380,7 @@ export default function Home() {
                 date: item.date,
                 passType: item.passType,
                 status: nextStatus,
+                previousStatus: item.currentStatus,
               });
             }
 
@@ -368,7 +412,14 @@ export default function Home() {
         setLastRunSummary(summary);
 
         if (logActivity && source !== "startup") {
-          prependActivity(source, summary);
+          prependActivity(
+            source,
+            summary,
+            changedItems.map((item) => {
+              const passName = PASS_TYPES.find((row) => row.id === item.passType)?.name ?? item.passType;
+              return `${passName} • ${formatWatchDate(item.date)} • ${STATUS_META[item.previousStatus].compactLabel} -> ${STATUS_META[item.status].compactLabel}`;
+            })
+          );
         }
 
         if (alertsEnabled && changedItems.length > 0 && canNotify() && Notification.permission === "granted") {
@@ -512,15 +563,29 @@ export default function Home() {
     return buildMonthCalendarRows(displayedMonth);
   }, [displayedMonth]);
 
-  const addWatchItem = useCallback(async () => {
-    if (!dateInput) {
+  const addWatchItemFromSelection = useCallback(async ({
+    date,
+    passType,
+    preferredPark,
+    syncFrequency: nextFrequency,
+  }: {
+    date: string;
+    passType: PassType;
+    preferredPark: ParkOption;
+    syncFrequency: FrequencyType;
+  }) => {
+    if (!date) {
       pushToast("error", "Choose a date first.");
       return;
     }
 
+    if (nextFrequency !== syncFrequency) {
+      setSyncFrequency(nextFrequency);
+    }
+
     const duplicate = watchItems.some(
       (item) =>
-        item.date === dateInput && item.passType === passType && item.preferredPark === preferredPark
+        item.date === date && item.passType === passType && item.preferredPark === preferredPark
     );
 
     if (duplicate) {
@@ -531,7 +596,7 @@ export default function Home() {
     const lookup = buildFeedLookup(feedRows);
     const nextStatus = resolveStatus(
       {
-        date: dateInput,
+        date,
         passType,
         preferredPark,
       },
@@ -545,7 +610,7 @@ export default function Home() {
 
     let nextItem: WatchItem = {
       id: crypto.randomUUID(),
-      date: dateInput,
+      date,
       passType,
       preferredPark,
       currentStatus: nextStatus,
@@ -557,7 +622,7 @@ export default function Home() {
       const response = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: dateInput, passType, preferredPark }),
+        body: JSON.stringify({ date, passType, preferredPark }),
       });
 
       const data = await response.json();
@@ -567,30 +632,50 @@ export default function Home() {
       }
 
       nextItem = data.item;
+      setAccountSaveState("saved");
+      setAccountSaveMessage(`Wishboard changes are saved to ${sessionUser.email}.`);
     }
 
     setWatchItems((current) => [...current, nextItem]);
-    setDisplayedMonth(monthKeyFromDate(dateInput));
+    setDisplayedMonth(monthKeyFromDate(date));
     setDateInput("");
 
     prependActivity(
       "system",
       `Added watched date: ${formatWatchDate(nextItem.date)} • ${
         PASS_TYPES.find((item) => item.id === passType)?.name
-      } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`
+      } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`,
+      [`Check frequency • ${nextFrequency}`]
     );
 
     pushToast("success", sessionUser ? "Watched date saved to your account." : "Watched date added.");
-  }, [dateInput, watchItems, passType, preferredPark, feedRows, lastSyncAt, prependActivity, pushToast, sessionUser]);
+  }, [feedRows, lastSyncAt, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
+
+  const addWatchItem = useCallback(async () => {
+    await addWatchItemFromSelection({
+      date: dateInput,
+      passType,
+      preferredPark,
+      syncFrequency,
+    });
+  }, [addWatchItemFromSelection, dateInput, passType, preferredPark, syncFrequency]);
 
   const removeWatchItem = useCallback(
     async (id: string) => {
       const item = watchItems.find((row) => row.id === id);
 
       if (sessionUser) {
-        await fetch(`/api/watchlist/${id}`, {
+        const response = await fetch(`/api/watchlist/${id}`, {
           method: "DELETE",
         });
+        if (!response.ok) {
+          pushToast("error", "We couldn't remove that watched date from your account yet.");
+          setAccountSaveState("error");
+          setAccountSaveMessage("A saved wishboard change did not reach your account.");
+          return;
+        }
+        setAccountSaveState("saved");
+        setAccountSaveMessage(`Wishboard changes are saved to ${sessionUser.email}.`);
       }
 
       setWatchItems((current) => current.filter((row) => row.id !== id));
@@ -604,7 +689,7 @@ export default function Home() {
         );
       }
     },
-    [watchItems, prependActivity, sessionUser]
+    [watchItems, prependActivity, pushToast, sessionUser]
   );
 
   const syncPushSubscription = useCallback(
@@ -738,6 +823,8 @@ export default function Home() {
     setSessionUser(null);
     setPushEnabled(false);
     setAuthMessage("");
+    setAccountSaveState("local");
+    setAccountSaveMessage("This wishboard is now local to this browser.");
     pushToast("success", "Signed out. Your local view is still here if you want to keep browsing.");
   }, [pushToast, sessionUser]);
 
@@ -830,6 +917,8 @@ export default function Home() {
             isSyncing={isSyncing}
             syncFrequency={syncFrequency}
             lastSyncAt={lastSyncAt}
+            sessionEmail={sessionUser?.email ?? null}
+            saveStatus={{ state: accountSaveState, message: accountSaveMessage }}
             onManualSync={() => void syncFeed("manual", true)}
             onRemoveWatchItem={(id: string) => void removeWatchItem(id)}
           />
@@ -840,6 +929,10 @@ export default function Home() {
             displayedMonth={displayedMonth}
             calendarRows={calendarRows}
             watchedByDate={watchedByDate}
+            defaultPassType={passType}
+            defaultPreferredPark={preferredPark}
+            defaultSyncFrequency={syncFrequency}
+            onQuickWatch={(payload) => void addWatchItemFromSelection(payload)}
             onPreviousMonth={() => setDisplayedMonth(previousMonthKey(displayedMonth))}
             onNextMonth={() => setDisplayedMonth(nextMonthKey(displayedMonth))}
           />
@@ -865,6 +958,7 @@ export default function Home() {
             pushConfigured={Boolean(pushPublicKey)}
             isSendingTestEmail={isSendingTestEmail}
             isSendingTestPush={isSendingTestPush}
+            accountSaveStatus={{ state: accountSaveState, message: accountSaveMessage }}
             onEmailEnabledChange={setEmailEnabled}
             emailAddress={emailAddress}
             onEmailAddressChange={setEmailAddress}

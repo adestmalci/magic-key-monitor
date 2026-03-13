@@ -7,6 +7,7 @@ type ActivityItem = {
   createdAt: string;
   source: "manual" | "auto" | "startup" | "system";
   message: string;
+  details?: string[];
 };
 
 function classNames(...items: Array<string | false | null | undefined>) {
@@ -88,6 +89,19 @@ export function ActivitySection({ activity }: { activity: ActivityItem[] }) {
                   </div>
 
                   <div className="mt-2 text-sm text-zinc-800">{item.message}</div>
+
+                  {item.details && item.details.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {item.details.map((detail, index) => (
+                        <div
+                          key={`${item.id}-${index}`}
+                          className="rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-700"
+                        >
+                          {detail}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ))}
