@@ -1,5 +1,10 @@
 import type { FeedRow, StatusType, SyncMeta, WatchItem } from "./types";
 
+export type CalendarCell = {
+  date: string;
+  day: number;
+};
+
 export function classNames(...items: Array<string | false | null | undefined>) {
   return items.filter(Boolean).join(" ");
 }
@@ -90,6 +95,37 @@ export function previousMonthKey(monthKey: string) {
   const [year, month] = monthKey.split("-").map(Number);
   const prev = new Date(year, month - 2, 1);
   return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function buildMonthCalendarRows(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const leadingBlanks = firstDay.getDay();
+
+  const cells: Array<CalendarCell | null> = [];
+
+  for (let i = 0; i < leadingBlanks; i += 1) {
+    cells.push(null);
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({
+      date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      day,
+    });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+
+  const rows: Array<Array<CalendarCell | null>> = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    rows.push(cells.slice(i, i + 7));
+  }
+
+  return rows;
 }
 
 export function buildFeedLookup(rows: FeedRow[]) {

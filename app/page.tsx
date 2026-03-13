@@ -26,6 +26,7 @@ import type {
   WatchItem,
 } from "../lib/magic-key/types";
 import {
+  buildMonthCalendarRows,
   buildFeedLookup,
   canNotify,
   canUsePushManager,
@@ -77,6 +78,7 @@ export default function Home() {
   const [lastRunSummary, setLastRunSummary] = useState("Ready to sync Disney data.");
   const [syncMeta, setSyncMeta] = useState<SyncMeta>(DEFAULT_SYNC_META);
   const [displayedMonth, setDisplayedMonth] = useState(currentMonthKey());
+  const [pickerMonth, setPickerMonth] = useState(currentMonthKey());
   const [toast, setToast] = useState<ToastState>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -189,6 +191,7 @@ export default function Home() {
       setLastSyncAt(parsed.lastSyncAt ?? "");
       setLastRunSummary(parsed.lastRunSummary ?? "Ready to sync Disney data.");
       setDisplayedMonth(parsed.displayedMonth ?? currentMonthKey());
+      setPickerMonth(parsed.pickerMonth ?? parsed.displayedMonth ?? currentMonthKey());
 
       const nextWatchItems = Array.isArray(parsed.watchItems)
         ? parsed.watchItems.map((item: WatchItem & { changedAt?: string }) => ({
@@ -227,6 +230,7 @@ export default function Home() {
         lastSyncAt,
         lastRunSummary,
         displayedMonth,
+        pickerMonth,
       })
     );
   }, [
@@ -243,6 +247,7 @@ export default function Home() {
     lastSyncAt,
     lastRunSummary,
     displayedMonth,
+    pickerMonth,
     hydrated,
   ]);
 
@@ -447,35 +452,62 @@ export default function Home() {
     return next;
   }, [watchItems]);
 
+  const pickerStatusByDate = useMemo(() => {
+    const next = new Map<string, StatusType>();
+
+    for (const row of feedRows) {
+      if (row.passType !== passType || row.preferredPark !== "either") continue;
+      next.set(row.date, normalizeStatus(String(row.status)));
+    }
+
+    return next;
+  }, [feedRows, passType]);
+
+  const pickerMonthBounds = useMemo(() => {
+    const months = Array.from(pickerStatusByDate.keys()).map((date) => date.slice(0, 7)).sort();
+    const fallback = currentMonthKey();
+
+    return {
+      min: months[0] ?? fallback,
+      max: months[months.length - 1] ?? fallback,
+    };
+  }, [pickerStatusByDate]);
+
+  useEffect(() => {
+    if (pickerMonth < pickerMonthBounds.min) {
+      setPickerMonth(pickerMonthBounds.min);
+      return;
+    }
+
+    if (pickerMonth > pickerMonthBounds.max) {
+      setPickerMonth(pickerMonthBounds.max);
+    }
+  }, [pickerMonth, pickerMonthBounds]);
+
+  const selectedDateStatus = useMemo(() => {
+    if (!dateInput) return null;
+    return pickerStatusByDate.get(dateInput) ?? null;
+  }, [dateInput, pickerStatusByDate]);
+
+  const pickerRows = useMemo(() => {
+    return buildMonthCalendarRows(pickerMonth).map((row) =>
+      row.map((cell) => {
+        if (!cell) return null;
+
+        const status = pickerStatusByDate.get(cell.date) ?? "unavailable";
+
+        return {
+          ...cell,
+          status,
+          disabled: status === "blocked",
+          selected: cell.date === dateInput,
+        };
+      })
+    );
+  }, [pickerMonth, pickerStatusByDate, dateInput]);
+
   const calendarRows = useMemo(() => {
-    const [year, month] = displayedMonth.split("-").map(Number);
-    const firstDay = new Date(year, month - 1, 1);
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const leadingBlanks = firstDay.getDay();
-
-    const cells: Array<{ date: string; day: number } | null> = [];
-
-    for (let i = 0; i < leadingBlanks; i += 1) {
-      cells.push(null);
-    }
-
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      cells.push({
-        date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-        day,
-      });
-    }
-
-    while (cells.length % 7 !== 0) {
-      cells.push(null);
-    }
-
-    const rows: Array<Array<{ date: string; day: number } | null>> = [];
-    for (let i = 0; i < cells.length; i += 7) {
-      rows.push(cells.slice(i, i + 7));
-    }
-
-    return rows;
+    return buildMonthCalendarRows(displayedMonth);
   }, [displayedMonth]);
 
   const addWatchItem = useCallback(async () => {
@@ -503,6 +535,11 @@ export default function Home() {
       },
       lookup
     );
+
+    if (nextStatus === "blocked") {
+      pushToast("error", "That date is blocked out for the selected key.");
+      return;
+    }
 
     let nextItem: WatchItem = {
       id: crypto.randomUUID(),
@@ -658,14 +695,11 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-8 md:px-8 lg:px-10">
-        <section className="grid gap-6 lg:grid-cols-[1.35fr_0.9fr]">
-          <HeroSection
-            watchCount={watchItems.length}
-            lastSyncAt={lastSyncAt}
-            lastRunSummary={lastRunSummary}
-            syncMeta={syncMeta}
-          />
+        <section>
+          <HeroSection />
+        </section>
 
+        <section>
           <AddWatchForm
             passType={passType}
             onPassTypeChange={setPassType}
@@ -675,6 +709,16 @@ export default function Home() {
             onPreferredParkChange={setPreferredPark}
             syncFrequency={syncFrequency}
             onSyncFrequencyChange={setSyncFrequency}
+            pickerMonth={pickerMonth}
+            pickerRows={pickerRows}
+            selectedDateStatus={selectedDateStatus}
+            canGoPreviousMonth={pickerMonth > pickerMonthBounds.min}
+            canGoNextMonth={pickerMonth < pickerMonthBounds.max}
+            onPreviousMonth={() => setPickerMonth(previousMonthKey(pickerMonth))}
+            onNextMonth={() => setPickerMonth(nextMonthKey(pickerMonth))}
+            watchCount={watchItems.length}
+            lastSyncAt={lastSyncAt}
+            syncMeta={syncMeta}
             onAddWatchItem={() => void addWatchItem()}
           />
         </section>

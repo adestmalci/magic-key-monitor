@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --cursor-mickey: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath fill='%23000' d='M9.1 2.75a4.35 4.35 0 1 0 0 8.7a4.35 4.35 0 0 0 0-8.7Zm9.8 0a4.35 4.35 0 1 0 0 8.7a4.35 4.35 0 0 0 0-8.7ZM14 8.9c-4.78 0-8.65 3.87-8.65 8.65S9.22 26.2 14 26.2s8.65-3.87 8.65-8.65S18.78 8.9 14 8.9Z'/%3E%3C/svg%3E");
 }
 
 @theme inline {
@@ -23,4 +24,15 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  cursor: var(--cursor-mickey) 14 11, auto;
+}
+
+button,
+a,
+select,
+input,
+label,
+summary,
+[role="button"] {
+  cursor: var(--cursor-mickey) 14 11, pointer;
 }

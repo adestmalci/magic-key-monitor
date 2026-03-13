@@ -1,3 +1,4 @@
+import { CircleOff, Minus } from "lucide-react";
 import { PASS_TYPES } from "../../lib/magic-key/config";
 import type { ParkOption, PassType, StatusType } from "../../lib/magic-key/types";
 import { classNames } from "../../lib/magic-key/utils";
@@ -19,4 +20,24 @@ export function ParkIcon({ park, size = "h-4 w-4" }: { park: ParkOption | Status
 
   if (!path) return null;
   return <img src={path} alt="" className={classNames(size, "object-contain")} />;
+}
+
+export function StatusIcon({
+  status,
+  size = "h-4 w-4",
+  className,
+}: {
+  status: StatusType;
+  size?: string;
+  className?: string;
+}) {
+  if (status === "blocked") {
+    return <Minus className={classNames(size, className)} />;
+  }
+
+  if (status === "unavailable") {
+    return <CircleOff className={classNames(size, className)} />;
+  }
+
+  return <ParkIcon park={status} size={size} />;
 }

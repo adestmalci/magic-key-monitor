@@ -3,11 +3,9 @@
 import { ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
 import { PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
 import type { WatchItem } from "../../lib/magic-key/types";
-import { formatMonthLabel } from "../../lib/magic-key/utils";
+import { formatMonthLabel, type CalendarCell } from "../../lib/magic-key/utils";
 import { PassIcon, ParkIcon } from "./icons";
 import { StatusBadge } from "./status-badge";
-
-type CalendarCell = { date: string; day: number } | null;
 
 export function CalendarSection({
   displayedMonth,
@@ -17,7 +15,7 @@ export function CalendarSection({
   onNextMonth,
 }: {
   displayedMonth: string;
-  calendarRows: CalendarCell[][];
+  calendarRows: Array<Array<CalendarCell | null>>;
   watchedByDate: Map<string, WatchItem[]>;
   onPreviousMonth: () => void;
   onNextMonth: () => void;
