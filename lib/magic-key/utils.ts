@@ -1,0 +1,114 @@
+import type { FeedRow, StatusType, WatchItem } from "./types";
+
+export function classNames(...items: Array<string | false | null | undefined>) {
+  return items.filter(Boolean).join(" ");
+}
+
+export function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function monthKeyFromDate(dateStr: string) {
+  return dateStr.slice(0, 7);
+}
+
+export function formatWatchDate(dateStr: string) {
+  const date = new Date(`${dateStr}T12:00:00`);
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+export function formatMonthLabel(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
+}
+
+export function formatSyncTime(iso: string) {
+  if (!iso) return "Waiting for live sync";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+export function formatActivityTime(iso: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+export function comparePriority(status: StatusType) {
+  if (status === "either") return 4;
+  if (status === "dl" || status === "dca") return 3;
+  if (status === "unavailable") return 2;
+  return 1;
+}
+
+export function normalizeStatus(value: string): StatusType {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (["either", "both", "either-park", "either_park"].includes(normalized)) return "either";
+  if (["dl", "disneyland"].includes(normalized)) return "dl";
+  if (["dca", "californiaadventure", "california-adventure", "adventure"].includes(normalized))
+    return "dca";
+  if (["blocked", "blockout", "blockedout"].includes(normalized)) return "blocked";
+  return "unavailable";
+}
+
+export function canNotify() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+export function nextMonthKey(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const next = new Date(year, month, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function previousMonthKey(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const prev = new Date(year, month - 2, 1);
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function buildFeedLookup(rows: FeedRow[]) {
+  const lookup = new Map<string, StatusType>();
+
+  for (const row of rows) {
+    if (!row?.date || !row?.passType || !row?.preferredPark) continue;
+    const key = `${row.date}__${row.passType}__${row.preferredPark}`;
+    lookup.set(key, normalizeStatus(String(row.status ?? "")));
+  }
+
+  return lookup;
+}
+
+export function resolveStatus(
+  item: Pick<WatchItem, "date" | "passType" | "preferredPark">,
+  lookup: Map<string, StatusType>
+): StatusType {
+  const exact = lookup.get(`${item.date}__${item.passType}__${item.preferredPark}`);
+  if (exact) return exact;
+
+  const either = lookup.get(`${item.date}__${item.passType}__either`);
+  if (either) {
+    if (item.preferredPark === "dl" && either === "either") return "dl";
+    if (item.preferredPark === "dca" && either === "either") return "dca";
+    return either;
+  }
+
+  return "unavailable";
+}
