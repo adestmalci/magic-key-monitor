@@ -1,4 +1,4 @@
-import { Bell, CalendarDays, Clock3, RefreshCcw, Trash2 } from "lucide-react";
+import { CalendarDays, Clock3, RefreshCcw, Trash2 } from "lucide-react";
 import { FREQUENCIES, PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
 import type { FrequencyType, WatchItem } from "../../lib/magic-key/types";
 import { formatSyncTime, formatWatchDate, classNames } from "../../lib/magic-key/utils";
@@ -7,23 +7,19 @@ import { ParkIcon, PassIcon } from "./icons";
 import { StatusBadge } from "./status-badge";
 
 export function WatchlistSection({
-  alertsEnabled,
   watchItems,
   lastRunSummary,
   isSyncing,
   syncFrequency,
   lastSyncAt,
-  onRequestNotifications,
   onManualSync,
   onRemoveWatchItem,
 }: {
-  alertsEnabled: boolean;
   watchItems: WatchItem[];
   lastRunSummary: string;
   isSyncing: boolean;
   syncFrequency: FrequencyType;
   lastSyncAt: string;
-  onRequestNotifications: () => void | Promise<void>;
   onManualSync: () => void;
   onRemoveWatchItem: (id: string) => void;
 }) {
@@ -38,25 +34,11 @@ export function WatchlistSection({
             Watched dates
           </div>
           <p className="mt-2 text-sm text-zinc-500">
-            Successful sync times now drive the dashboard timestamp and every card timestamp below.
+            Keep your wishboard tidy here, then run a live sync whenever you want a fresh Disney check.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={onRequestNotifications}
-            className={classNames(
-              "inline-flex h-11 items-center gap-2 rounded-2xl border px-4 text-sm font-medium transition",
-              alertsEnabled
-                ? "border-violet-200 bg-violet-50 text-violet-900"
-                : "border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-            )}
-          >
-            <Bell className="h-4 w-4" />
-            {alertsEnabled ? "Notifications on" : "Enable notifications"}
-          </button>
-
           <button
             type="button"
             onClick={onManualSync}

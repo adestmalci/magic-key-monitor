@@ -689,7 +689,7 @@ export default function Home() {
     { id: "watchlist", label: "Watchlist" },
     { id: "calendar", label: "Calendar" },
     { id: "activity", label: "Activity" },
-    { id: "alerts", label: "Alerts" },
+    { id: "alerts", label: "Account" },
   ];
 
   return (
@@ -729,13 +729,11 @@ export default function Home() {
 
         {activeTab === "watchlist" && (
           <WatchlistSection
-            alertsEnabled={alertsEnabled}
             watchItems={watchItems}
             lastRunSummary={lastRunSummary}
             isSyncing={isSyncing}
             syncFrequency={syncFrequency}
             lastSyncAt={lastSyncAt}
-            onRequestNotifications={requestNotifications}
             onManualSync={() => void syncFeed("manual", true)}
             onRemoveWatchItem={(id: string) => void removeWatchItem(id)}
           />
