@@ -1,0 +1,42 @@
+name: Magic Key Sync
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magic-key-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger backend sync
+        env:
+          MAGIC_KEY_APP_URL: ${{ secrets.MAGIC_KEY_APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MAGIC_KEY_APP_URL:-}" ]; then
+            echo "Missing GitHub secret: MAGIC_KEY_APP_URL"
+            exit 1
+          fi
+
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "Missing GitHub secret: CRON_SECRET"
+            exit 1
+          fi
+
+          APP_URL="${MAGIC_KEY_APP_URL%/}"
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "User-Agent: github-actions-magic-key-monitor" \
+            "${APP_URL}/api/cron/sync"

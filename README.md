@@ -1,5 +1,18 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Scheduler Setup
+
+This project is set up to keep the website on Vercel while running background syncs from GitHub Actions every 5 minutes.
+
+Add these GitHub repository secrets before enabling the workflow:
+
+- `MAGIC_KEY_APP_URL`
+  - Your deployed app URL, for example `https://your-app.vercel.app`
+- `CRON_SECRET`
+  - Must match the `CRON_SECRET` value used by the app environment on Vercel
+
+The workflow file lives at [`.github/workflows/sync-magic-key.yml`](./.github/workflows/sync-magic-key.yml).
+
 ## Getting Started
 
 First, run the development server:
