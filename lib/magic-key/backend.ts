@@ -71,6 +71,7 @@ export type AlertChange = {
 const STATE_PATH = getDataPath("magic-key-backend.json");
 const FEED_PATH = getDataPath("magic-key-feed.json");
 const SESSION_COOKIE = "magic_key_session";
+const MAGIC_LINK_RETENTION_MS = 1000 * 60 * 60 * 24 * 7;
 
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
@@ -100,6 +101,30 @@ function defaultState(): BackendState {
     magicLinks: [],
     pushSubscriptions: [],
     syncMeta: DEFAULT_SYNC_META,
+  };
+}
+
+function pruneMagicLinks(records: MagicLinkRecord[], now = Date.now()) {
+  return records.filter((record) => {
+    const expiryTime = Date.parse(record.expiresAt);
+    const usedTime = record.usedAt ? Date.parse(record.usedAt) : NaN;
+
+    if (Number.isFinite(usedTime)) {
+      return now - usedTime <= MAGIC_LINK_RETENTION_MS;
+    }
+
+    if (Number.isFinite(expiryTime)) {
+      return now - expiryTime <= MAGIC_LINK_RETENTION_MS;
+    }
+
+    return false;
+  });
+}
+
+function pruneBackendState(state: BackendState): BackendState {
+  return {
+    ...state,
+    magicLinks: pruneMagicLinks(state.magicLinks),
   };
 }
 
@@ -170,7 +195,7 @@ export async function readBackendState(): Promise<BackendState> {
     users: Array.isArray(parsed.users) ? parsed.users : [],
     preferences: Array.isArray(parsed.preferences) ? parsed.preferences : [],
     watchItems: Array.isArray(parsed.watchItems) ? parsed.watchItems : [],
-    magicLinks: Array.isArray(parsed.magicLinks) ? parsed.magicLinks : [],
+    magicLinks: pruneMagicLinks(Array.isArray(parsed.magicLinks) ? parsed.magicLinks : []),
     pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
   };
 }
@@ -179,7 +204,7 @@ export async function writeBackendState(state: BackendState) {
   await writeStoredValue({
     storageKey: "backend-state",
     localPath: STATE_PATH,
-    value: state,
+    value: pruneBackendState(state),
   });
 }
 

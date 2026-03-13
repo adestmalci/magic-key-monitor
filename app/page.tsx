@@ -34,6 +34,7 @@ import {
   currentMonthKey,
   formatWatchDate,
   monthKeyFromDate,
+  needsIosHomeScreenNotifications,
   nextMonthKey,
   normalizeStatus,
   previousMonthKey,
@@ -50,6 +51,18 @@ const DEFAULT_SYNC_META: SyncMeta = {
   message: "Ready to sync Disney data.",
   lastError: "",
 };
+const ACTIVITY_RETENTION_MS = 1000 * 60 * 60 * 6;
+const ACTIVITY_PRUNE_INTERVAL_MS = 1000 * 60;
+
+function pruneActivityItems(items: ActivityItem[], now = Date.now()) {
+  return items
+    .filter((item) => {
+      const createdAt = Date.parse(item.createdAt);
+      if (!Number.isFinite(createdAt)) return false;
+      return now - createdAt <= ACTIVITY_RETENTION_MS;
+    })
+    .slice(0, 40);
+}
 
 export default function Home() {
   const [hydrated, setHydrated] = useState(false);
@@ -105,7 +118,7 @@ export default function Home() {
 
   const prependActivity = useCallback((source: SyncSource | "system", message: string, details?: string[]) => {
     setActivity((current) =>
-      [
+      pruneActivityItems([
         {
           id: crypto.randomUUID(),
           createdAt: new Date().toISOString(),
@@ -114,9 +127,23 @@ export default function Home() {
           details,
         },
         ...current,
-      ].slice(0, 40)
+      ])
     );
   }, []);
+
+  const needsIosInstallForNotifications = needsIosHomeScreenNotifications();
+  const notificationsSupported = canNotify();
+  const notificationsGranted = notificationsSupported && Notification.permission === "granted";
+  const notificationsStatusMessage = !notificationsSupported
+    ? needsIosInstallForNotifications
+      ? "On iPhone, add this site to your Home Screen to enable notifications."
+      : "This browser does not support notifications."
+    : notificationsGranted
+      ? "Permission granted on this browser"
+      : "Permission not granted yet";
+  const notificationsHelpText = needsIosInstallForNotifications
+    ? "Open this site in Safari, tap Share, choose Add to Home Screen, then open it from your Home Screen and try again."
+    : "";
 
   const applyDashboardState = useCallback((data: DashboardUserState) => {
     setSessionUser(data.user);
@@ -198,7 +225,7 @@ export default function Home() {
       setEmailEnabled(parsed.emailEnabled ?? false);
       setEmailAddress(parsed.emailAddress ?? "");
       setFeedRows(parsed.feedRows ?? []);
-      setActivity(parsed.activity ?? []);
+      setActivity(pruneActivityItems(Array.isArray(parsed.activity) ? parsed.activity : []));
       setLastSyncAt(parsed.lastSyncAt ?? "");
       setLastRunSummary(parsed.lastRunSummary ?? "Ready to sync Disney data.");
       setDisplayedMonth(parsed.displayedMonth ?? currentMonthKey());
@@ -225,6 +252,7 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated) return;
 
+    const activityToPersist = pruneActivityItems(activity);
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
@@ -237,7 +265,7 @@ export default function Home() {
         emailAddress,
         watchItems,
         feedRows,
-        activity,
+        activity: activityToPersist,
         lastSyncAt,
         lastRunSummary,
         displayedMonth,
@@ -261,6 +289,16 @@ export default function Home() {
     pickerMonth,
     hydrated,
   ]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const interval = window.setInterval(() => {
+      setActivity((current) => pruneActivityItems(current));
+    }, ACTIVITY_PRUNE_INTERVAL_MS);
+
+    return () => window.clearInterval(interval);
+  }, [hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -738,7 +776,12 @@ export default function Home() {
 
   const requestNotifications = useCallback(async () => {
     if (!canNotify()) {
-      pushToast("error", "Browser notifications are not available here.");
+      pushToast(
+        "error",
+        needsIosHomeScreenNotifications()
+          ? "On iPhone, add this site to your Home Screen in Safari, then open it there to enable notifications."
+          : "Browser notifications are not available here."
+      );
       return;
     }
 
@@ -952,8 +995,10 @@ export default function Home() {
             pushEnabled={pushEnabled}
             requestNotifications={() => void requestNotifications()}
             emailEnabled={emailEnabled}
-            notificationsSupported={canNotify()}
-            notificationsGranted={canNotify() && Notification.permission === "granted"}
+            notificationsSupported={notificationsSupported}
+            notificationsGranted={notificationsGranted}
+            notificationsStatusMessage={notificationsStatusMessage}
+            notificationsHelpText={notificationsHelpText}
             pushSupported={canUsePushManager()}
             pushConfigured={Boolean(pushPublicKey)}
             isSendingTestEmail={isSendingTestEmail}

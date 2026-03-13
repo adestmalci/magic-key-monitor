@@ -16,6 +16,8 @@ export function AlertsSection({
   emailAddress,
   notificationsSupported,
   notificationsGranted,
+  notificationsStatusMessage,
+  notificationsHelpText,
   pushSupported,
   pushConfigured,
   isSendingTestEmail,
@@ -39,6 +41,8 @@ export function AlertsSection({
   emailAddress: string;
   notificationsSupported: boolean;
   notificationsGranted: boolean;
+  notificationsStatusMessage: string;
+  notificationsHelpText: string;
   pushSupported: boolean;
   pushConfigured: boolean;
   isSendingTestEmail: boolean;
@@ -226,13 +230,15 @@ export function AlertsSection({
                     : "border-zinc-200 bg-white text-zinc-700"
                 )}
               >
-                {!notificationsSupported
-                  ? "This browser does not support notifications"
-                  : notificationsGranted
-                    ? "Permission granted on this browser"
-                    : "Permission not granted yet"}
+                {notificationsStatusMessage}
               </div>
             </div>
+
+            {!notificationsSupported && notificationsHelpText ? (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                {notificationsHelpText}
+              </div>
+            ) : null}
 
             {alertsEnabled && notificationsGranted ? (
               <div className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">

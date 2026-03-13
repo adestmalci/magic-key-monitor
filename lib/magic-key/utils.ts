@@ -85,6 +85,21 @@ export function canUsePushManager() {
   );
 }
 
+export function needsIosHomeScreenNotifications() {
+  if (typeof window === "undefined") return false;
+
+  const userAgent = window.navigator.userAgent || "";
+  const isAppleMobile = /iPhone|iPad|iPod/i.test(userAgent);
+  const isSafari =
+    /Safari/i.test(userAgent) &&
+    !/CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo|YaBrowser/i.test(userAgent);
+  const standalone =
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+
+  return isAppleMobile && isSafari && !standalone;
+}
+
 export function nextMonthKey(monthKey: string) {
   const [year, month] = monthKey.split("-").map(Number);
   const next = new Date(year, month, 1);
