@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { normalizeSupportedFrequency } from "./config";
 import { buildFeedLookup, resolveStatus } from "./utils";
 import type {
   DashboardUserState,
@@ -88,7 +89,7 @@ function defaultPreferences(): UserPreferences {
     emailAddress: "",
     alertsEnabled: false,
     pushEnabled: false,
-    syncFrequency: "1m",
+    syncFrequency: "5m",
   };
 }
 
@@ -208,7 +209,10 @@ export function getUserFromState(state: BackendState, userId: string) {
 export function getPreferencesFromState(state: BackendState, userId: string): StoredPreferences {
   const existing = state.preferences.find((item) => item.userId === userId);
 
-  if (existing) return existing;
+  if (existing) {
+    existing.syncFrequency = normalizeSupportedFrequency(existing.syncFrequency);
+    return existing;
+  }
 
   const created: StoredPreferences = {
     userId,
@@ -351,7 +355,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       emailAddress: preferences.emailAddress,
       alertsEnabled: preferences.alertsEnabled,
       pushEnabled: preferences.pushEnabled,
-      syncFrequency: preferences.syncFrequency,
+      syncFrequency: normalizeSupportedFrequency(preferences.syncFrequency),
     },
     watchItems: getWatchItemsForUser(state, user.id).map((item) => ({
       id: item.id,
@@ -378,7 +382,7 @@ export async function upsertPreferencesForUser(
   preferences.emailAddress = patch.emailAddress ?? preferences.emailAddress;
   preferences.alertsEnabled = patch.alertsEnabled ?? preferences.alertsEnabled;
   preferences.pushEnabled = patch.pushEnabled ?? preferences.pushEnabled;
-  preferences.syncFrequency = patch.syncFrequency ?? preferences.syncFrequency;
+  preferences.syncFrequency = normalizeSupportedFrequency(patch.syncFrequency ?? preferences.syncFrequency);
 
   await writeBackendState(state);
 
@@ -387,7 +391,7 @@ export async function upsertPreferencesForUser(
     emailAddress: preferences.emailAddress,
     alertsEnabled: preferences.alertsEnabled,
     pushEnabled: preferences.pushEnabled,
-    syncFrequency: preferences.syncFrequency,
+    syncFrequency: normalizeSupportedFrequency(preferences.syncFrequency),
   };
 }
 

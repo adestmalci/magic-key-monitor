@@ -9,7 +9,7 @@ import { HeroSection } from "../components/magic-key/hero-section";
 import { SummaryCards } from "../components/magic-key/summary-cards";
 import { TabsNav } from "../components/magic-key/tabs-nav";
 import { WatchlistSection } from "../components/magic-key/watchlist-section";
-import { ENDPOINT_URL, PARK_OPTIONS, PASS_TYPES, POLL_MS, STATUS_META, STORAGE_KEY } from "../lib/magic-key/config";
+import { ENDPOINT_URL, normalizeSupportedFrequency, PARK_OPTIONS, PASS_TYPES, POLL_MS, STATUS_META, STORAGE_KEY } from "../lib/magic-key/config";
 import type {
   ActivityItem,
   DashboardUserState,
@@ -59,7 +59,7 @@ export default function Home() {
 
   const [passType, setPassType] = useState<PassType>("enchant");
   const [preferredPark, setPreferredPark] = useState<ParkOption>("either");
-  const [syncFrequency, setSyncFrequency] = useState<FrequencyType>("1m");
+  const [syncFrequency, setSyncFrequency] = useState<FrequencyType>("5m");
 
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -133,7 +133,7 @@ export default function Home() {
       setPushEnabled(data.preferences.pushEnabled);
       setEmailEnabled(data.preferences.emailEnabled);
       setEmailAddress(data.preferences.emailAddress || data.user.email);
-      setSyncFrequency(data.preferences.syncFrequency);
+      setSyncFrequency(normalizeSupportedFrequency(data.preferences.syncFrequency));
       setAuthEmail(data.user.email);
       setWatchItems(data.watchItems);
       setAccountSaveState("saved");
@@ -193,7 +193,7 @@ export default function Home() {
       setActiveTab(parsed.activeTab ?? "watchlist");
       setPassType(parsed.passType ?? "enchant");
       setPreferredPark(parsed.preferredPark ?? "either");
-      setSyncFrequency(parsed.syncFrequency ?? "1m");
+      setSyncFrequency(normalizeSupportedFrequency(parsed.syncFrequency));
       setAlertsEnabled(parsed.alertsEnabled ?? false);
       setEmailEnabled(parsed.emailEnabled ?? false);
       setEmailAddress(parsed.emailAddress ?? "");
