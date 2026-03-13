@@ -112,11 +112,13 @@ export function CalendarSection({
               return (
                 <div
                   key={cell.date}
-                  className={
+                  className={classNames(
+                    "relative min-h-[150px] rounded-[24px] p-3 shadow-sm transition",
                     items.length > 0
-                      ? "min-h-[150px] rounded-[24px] border border-violet-300 bg-violet-50/50 p-3 shadow-sm transition"
-                      : "min-h-[150px] rounded-[24px] border border-zinc-200 bg-white p-3 shadow-sm transition"
-                  }
+                      ? "border border-violet-300 bg-violet-50/50"
+                      : "border border-zinc-200 bg-white",
+                    isExpanded && "z-20"
+                  )}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-lg font-semibold text-zinc-900">{cell.day}</div>
@@ -140,18 +142,23 @@ export function CalendarSection({
                       </button>
 
                       {isExpanded ? (
-                        <div className="mt-3 rounded-[22px] border border-violet-200 bg-violet-50/60 p-3">
+                        <div
+                          className={classNames(
+                            "absolute top-[92px] z-30 w-[260px] rounded-[24px] border border-violet-200 bg-white p-3 shadow-xl shadow-violet-100",
+                            cellIndex >= 4 ? "right-0" : "left-0"
+                          )}
+                        >
                           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                             Choose your key
                           </div>
-                          <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="mt-2 grid grid-cols-5 gap-1.5">
                             {PASS_TYPES.map((pass) => (
                               <button
                                 key={pass.id}
                                 type="button"
                                 onClick={() => setQuickPassType(pass.id)}
                                 className={classNames(
-                                  "rounded-2xl border px-2 py-2 text-center transition",
+                                  "rounded-2xl border px-1.5 py-2 text-center transition",
                                   quickPassType === pass.id
                                     ? "border-violet-400 bg-white shadow-sm"
                                     : "border-white/80 bg-white/70 hover:border-violet-200"
@@ -160,7 +167,7 @@ export function CalendarSection({
                                 <div className="mx-auto flex h-7 w-7 items-center justify-center">
                                   <PassIcon passType={pass.id} size="h-6 w-6" />
                                 </div>
-                                <div className="mt-1 text-[11px] font-medium text-zinc-800">{pass.short}</div>
+                                <div className="mt-1 text-[10px] font-medium text-zinc-800">{pass.short}</div>
                               </button>
                             ))}
                           </div>
@@ -182,7 +189,7 @@ export function CalendarSection({
                                 )}
                               >
                                 <ParkIcon park={park.value} size="h-4 w-4" />
-                                <span className="mt-1 text-[10px] font-medium text-zinc-700">{park.label}</span>
+                                <span className="mt-1 text-[9px] font-medium text-zinc-700">{park.label}</span>
                               </button>
                             ))}
                           </div>
