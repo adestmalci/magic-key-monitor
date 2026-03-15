@@ -53,7 +53,6 @@ const DEFAULT_SYNC_META: SyncMeta = {
 };
 const ACTIVITY_RETENTION_MS = 1000 * 60 * 60 * 6;
 const ACTIVITY_PRUNE_INTERVAL_MS = 1000 * 60;
-const ACTIVE_TAB_REFRESH_MS = 60_000;
 
 function pruneActivityItems(items: ActivityItem[], now = Date.now()) {
   return items
@@ -534,36 +533,6 @@ export default function Home() {
 
   useEffect(() => {
     if (!hydrated) return;
-
-    const runVisibleRefresh = () => {
-      if (document.visibilityState !== "visible") return;
-      void syncFeed("auto", false);
-    };
-
-    const interval = window.setInterval(runVisibleRefresh, ACTIVE_TAB_REFRESH_MS);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        runVisibleRefresh();
-      }
-    };
-
-    const handleFocus = () => {
-      runVisibleRefresh();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [hydrated, syncFeed]);
-
-  useEffect(() => {
-    if (!hydrated) return;
     if (!passTypeSyncReadyRef.current) {
       passTypeSyncReadyRef.current = true;
       return;
@@ -921,6 +890,7 @@ export default function Home() {
 
     const data = await response.json();
     if (!response.ok) {
+      setAuthMessage(data.error || "We couldn't send the magic link yet.");
       pushToast("error", data.error || "We couldn't send the magic link yet.");
       return;
     }

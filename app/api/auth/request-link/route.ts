@@ -42,13 +42,21 @@ export async function POST(request: Request) {
     });
   }
 
-  const resend = new Resend(apiKey);
-  await resend.emails.send({
-    from: process.env.RESEND_FROM_EMAIL || "Magic Key Monitor <onboarding@resend.dev>",
-    to: email,
-    subject: "Your Magic Key Monitor sign-in link",
-    html: emailHtml(link),
-  });
+  try {
+    const resend = new Resend(apiKey);
+    await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || "Magic Key Monitor <onboarding@resend.dev>",
+      to: email,
+      subject: "Your Magic Key Monitor sign-in link",
+      html: emailHtml(link),
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "We couldn't send the magic link yet.";
+    const normalized = /unauthorized/i.test(message)
+      ? "Email sending is not authorized yet. Check your Resend sending address or verified domain."
+      : message;
+    return Response.json({ error: normalized }, { status: 400 });
+  }
 
   return Response.json({ ok: true, message: "Magic link sent." });
 }
