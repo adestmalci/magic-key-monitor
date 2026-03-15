@@ -3,7 +3,8 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  --cursor-mickey-hand: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cg fill='%23000'%3E%3Crect x='7.4' y='2.8' width='3.6' height='10.2' rx='1.8'/%3E%3Ccircle cx='9.2' cy='3.2' r='1.8'/%3E%3Crect x='10.6' y='5.8' width='3.1' height='7.1' rx='1.55'/%3E%3Ccircle cx='12.15' cy='6.1' r='1.55'/%3E%3Crect x='13.5' y='7.4' width='2.7' height='5.7' rx='1.35'/%3E%3Ccircle cx='14.85' cy='7.7' r='1.35'/%3E%3Cellipse cx='9.8' cy='14.9' rx='4.6' ry='3.9'/%3E%3Cpath d='M4.6 11.6c-.55-.44-1.36-.36-1.8.19c-.45.55-.36 1.35.19 1.8l4.95 4.04l1.61-1.98l-5.01-4.11Z'/%3E%3Crect x='7.6' y='17.6' width='7.1' height='3' rx='1.2'/%3E%3C/g%3E%3C/svg%3E");
+  --cursor-mickey-hand: url("/branding/mickey-hand-cursor.png");
+  --cursor-mickey-hand-fallback: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cg fill='%23000'%3E%3Crect x='7.4' y='2.8' width='3.6' height='10.2' rx='1.8'/%3E%3Ccircle cx='9.2' cy='3.2' r='1.8'/%3E%3Crect x='10.6' y='5.8' width='3.1' height='7.1' rx='1.55'/%3E%3Ccircle cx='12.15' cy='6.1' r='1.55'/%3E%3Crect x='13.5' y='7.4' width='2.7' height='5.7' rx='1.35'/%3E%3Ccircle cx='14.85' cy='7.7' r='1.35'/%3E%3Cellipse cx='9.8' cy='14.9' rx='4.6' ry='3.9'/%3E%3Cpath d='M4.6 11.6c-.55-.44-1.36-.36-1.8.19c-.45.55-.36 1.35.19 1.8l4.95 4.04l1.61-1.98l-5.01-4.11Z'/%3E%3Crect x='7.6' y='17.6' width='7.1' height='3' rx='1.2'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 @theme inline {
@@ -24,7 +25,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
-  cursor: var(--cursor-mickey-hand) 6 3, auto;
+  cursor: var(--cursor-mickey-hand) 6 3, var(--cursor-mickey-hand-fallback) 6 3, auto;
   overflow-x: hidden;
 }
 
@@ -35,7 +36,7 @@ input,
 label,
 summary,
 [role="button"] {
-  cursor: var(--cursor-mickey-hand) 6 3, pointer;
+  cursor: var(--cursor-mickey-hand) 6 3, var(--cursor-mickey-hand-fallback) 6 3, pointer;
 }
 
 .mickey-fall {

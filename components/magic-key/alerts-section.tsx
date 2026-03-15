@@ -57,6 +57,9 @@ export function AlertsSection({
   onSendTestEmail: () => void | Promise<void>;
   onSendTestPush: () => void | Promise<void>;
 }) {
+  const isLocalBuild =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
   const emailTarget = emailAddress || user?.email || "";
   const notificationsButtonLabel = notificationsGranted ? "Notifications enabled" : "Enable notifications";
   const notificationStatusTone = pushEnabled
@@ -68,12 +71,14 @@ export function AlertsSection({
     ? "Closed-app push is ready on this device."
     : !notificationsSupported
       ? notificationsStatusMessage
-      : !user
-        ? "Notifications are on here. Sign in if you want this device to receive closed-app background alerts."
+        : !user
+          ? "Notifications are on here. Sign in if you want this device to receive closed-app background alerts."
         : !pushSupported
           ? "Notifications are on, but this browser cannot save a closed-app push subscription."
         : !pushConfigured
-          ? "Notifications are allowed, but background push still needs app push configuration."
+          ? isLocalBuild
+            ? "This localhost build does not have the deployed push key, so background push only works on the hosted app."
+            : "Notifications are allowed, but background push still needs app push configuration."
           : notificationsGranted
             ? "Notifications are allowed. We will finish background push as soon as this device saves its subscription."
             : "Notifications are not enabled yet on this device.";
@@ -118,20 +123,22 @@ export function AlertsSection({
 
             {user ? (
               <div className="mt-4 space-y-4">
-                <div className="rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm text-zinc-700">
-                  Signed in as <span className="font-semibold text-zinc-900">{user.email}</span>
+                <div className="flex flex-col gap-3 rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm text-zinc-700 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    Signed in as <span className="font-semibold text-zinc-900">{user.email}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 text-sm font-semibold text-zinc-700"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sign out
+                  </button>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
                   Your server-side watchlist, delivery preferences, and check cadence now stay tied to this account.
                 </div>
-                <button
-                  type="button"
-                  onClick={onSignOut}
-                  className="inline-flex h-11 items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Sign out
-                </button>
               </div>
             ) : (
               <div className="mt-4 space-y-3">
@@ -202,29 +209,28 @@ export function AlertsSection({
 
             <label className="mt-4 grid gap-2">
               <span className="text-sm text-zinc-700">Delivery email</span>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                <input
-                  type="email"
-                  value={emailAddress}
-                  onChange={(event) => onEmailAddressChange(event.target.value)}
-                  placeholder="name@example.com"
-                  className="h-12 w-full rounded-2xl border border-zinc-200 bg-white pl-10 pr-4 text-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                />
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="relative flex-1">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="email"
+                    value={emailAddress}
+                    onChange={(event) => onEmailAddressChange(event.target.value)}
+                    placeholder="name@example.com"
+                    className="h-12 w-full rounded-2xl border border-zinc-200 bg-white pl-10 pr-4 text-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={onSendTestEmail}
+                  disabled={!user || !emailTarget || isSendingTestEmail}
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 sm:shrink-0"
+                >
+                  <Mail className="h-4 w-4" />
+                  {isSendingTestEmail ? "Sending..." : "Send test email"}
+                </button>
               </div>
             </label>
-
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={onSendTestEmail}
-                disabled={!user || !emailTarget || isSendingTestEmail}
-                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Mail className="h-4 w-4" />
-                {isSendingTestEmail ? "Sending..." : "Send test email"}
-              </button>
-            </div>
           </div>
         </div>
 
@@ -302,7 +308,9 @@ export function AlertsSection({
                     : !pushSupported
                       ? "This browser cannot save a web push subscription"
                       : !pushConfigured
-                        ? "Push env vars still need to be configured"
+                        ? isLocalBuild
+                          ? "Push is configured on the hosted app, but this localhost build does not have the public push key."
+                          : "Push env vars still need to be configured"
                         : "This device has not saved a push subscription yet"}
               </div>
             </div>

@@ -53,6 +53,7 @@ const DEFAULT_SYNC_META: SyncMeta = {
 };
 const ACTIVITY_RETENTION_MS = 1000 * 60 * 60 * 6;
 const ACTIVITY_PRUNE_INTERVAL_MS = 1000 * 60;
+const ACTIVE_TAB_REFRESH_MS = 60_000;
 
 function pruneActivityItems(items: ActivityItem[], now = Date.now()) {
   return items
@@ -103,6 +104,7 @@ export default function Home() {
   const watchItemsRef = useRef<WatchItem[]>([]);
   const importedLocalRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
+  const passTypeSyncReadyRef = useRef(false);
 
   useEffect(() => {
     watchItemsRef.current = watchItems;
@@ -378,7 +380,7 @@ export default function Home() {
       setIsSyncing(true);
 
       try {
-        const refresh = source === "manual" ? "&refresh=1" : "";
+        const refresh = source === "manual" || !logActivity ? "&refresh=1" : "";
         const response = await fetch(`${ENDPOINT_URL}?t=${Date.now()}${refresh}`, {
           cache: "no-store",
         });
@@ -524,11 +526,51 @@ export default function Home() {
     if (!hydrated || syncFrequency === "manual") return;
 
     const interval = window.setInterval(() => {
-      void syncFeed("auto", true);
+      void syncFeed("auto", watchItemsRef.current.length > 0);
     }, POLL_MS[syncFrequency]);
 
     return () => window.clearInterval(interval);
   }, [hydrated, syncFrequency, syncFeed]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const runVisibleRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void syncFeed("auto", false);
+    };
+
+    const interval = window.setInterval(runVisibleRefresh, ACTIVE_TAB_REFRESH_MS);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        runVisibleRefresh();
+      }
+    };
+
+    const handleFocus = () => {
+      runVisibleRefresh();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [hydrated, syncFeed]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!passTypeSyncReadyRef.current) {
+      passTypeSyncReadyRef.current = true;
+      return;
+    }
+    if (document.visibilityState !== "visible") return;
+    void syncFeed("auto", false);
+  }, [hydrated, passType, syncFeed]);
 
   const summary = useMemo(() => {
     const counts = { available: 0, unavailable: 0, blocked: 0 };

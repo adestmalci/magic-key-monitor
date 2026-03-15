@@ -5,8 +5,7 @@ import { useState } from "react";
 import { FREQUENCIES, PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
 import type { FrequencyType, ParkOption, PassType, WatchItem } from "../../lib/magic-key/types";
 import { classNames, formatMonthLabel, type CalendarCell } from "../../lib/magic-key/utils";
-import { PassIcon, ParkIcon } from "./icons";
-import { StatusBadge } from "./status-badge";
+import { PassIcon, ParkIcon, StatusIcon } from "./icons";
 
 function QuickWatchFields({
   compact = false,
@@ -281,25 +280,24 @@ export function CalendarSection({
                     <div className="mt-2 space-y-1.5 sm:mt-3 sm:space-y-2">
                       {items.slice(0, 2).map((item) => {
                         const pass = PASS_TYPES.find((row) => row.id === item.passType)!;
-                        const park = PARK_OPTIONS.find((row) => row.value === item.preferredPark)!;
 
                         return (
                           <div
                             key={item.id}
-                            className="rounded-2xl border border-white/70 bg-white/80 p-2 shadow-sm sm:p-2.5"
+                            className="rounded-2xl border border-white/70 bg-white/80 p-2 text-center shadow-sm sm:p-2.5"
                           >
-                            <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-700 sm:gap-2 sm:text-xs">
+                            <div className="flex items-center justify-center gap-1.5 text-[11px] font-medium text-zinc-700 sm:gap-2 sm:text-xs">
                               <PassIcon passType={item.passType} size="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                               <span>{pass.short}</span>
                             </div>
 
-                            <div className="mt-1.5 sm:mt-2">
-                              <StatusBadge status={item.currentStatus} compact />
-                            </div>
-
-                            <div className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-[10px] text-zinc-700 sm:mt-2 sm:gap-1.5 sm:text-[11px]">
-                              <ParkIcon park={item.preferredPark} size="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                              {park.label}
+                            <div className="mt-2 flex items-center justify-center gap-2.5 sm:mt-2.5">
+                              <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-zinc-700 sm:h-8 sm:w-8">
+                                <StatusIcon status={item.currentStatus} size="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                              </div>
+                              <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-zinc-700 sm:h-8 sm:w-8">
+                                <ParkIcon park={item.preferredPark} size="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                              </div>
                             </div>
                           </div>
                         );
