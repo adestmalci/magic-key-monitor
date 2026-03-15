@@ -295,13 +295,14 @@ export function getActivityForUser(state: BackendState, userId: string) {
 export function recordActivityForUser(
   state: BackendState,
   userId: string,
-  entry: Pick<ActivityItem, "source" | "message" | "details"> & { createdAt?: string }
+  entry: Pick<ActivityItem, "source" | "trigger" | "message" | "details"> & { createdAt?: string }
 ) {
   state.activity.unshift({
     id: randomUUID(),
     userId,
     createdAt: entry.createdAt || new Date().toISOString(),
     source: entry.source,
+    trigger: entry.trigger,
     message: entry.message,
     details: entry.details,
   });
@@ -695,7 +696,7 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
 
 export async function persistActivityForUser(
   userId: string,
-  entry: Pick<ActivityItem, "source" | "message" | "details"> & { createdAt?: string }
+  entry: Pick<ActivityItem, "source" | "trigger" | "message" | "details"> & { createdAt?: string }
 ) {
   const state = await readBackendState();
   recordActivityForUser(state, userId, entry);

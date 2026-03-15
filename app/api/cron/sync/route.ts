@@ -34,6 +34,7 @@ export async function GET(request: Request) {
 
       recordActivityForUser(evaluation.state, userId, {
         source: "auto",
+        trigger: "Background 5-minute scheduler",
         message: summary,
         details: changes.map(({ item, previousStatus, currentStatus }) => {
           const passName = PASS_TYPES.find((row) => row.id === item.passType)?.name ?? item.passType;

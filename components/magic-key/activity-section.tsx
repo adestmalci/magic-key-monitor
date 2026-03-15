@@ -6,6 +6,7 @@ type ActivityItem = {
   id: string;
   createdAt: string;
   source: "manual" | "auto" | "startup" | "system";
+  trigger?: string;
   message: string;
   details?: string[];
 };
@@ -87,6 +88,14 @@ export function ActivitySection({ activity }: { activity: ActivityItem[] }) {
                       {formatActivityTime(item.createdAt)}
                     </span>
                   </div>
+
+                  {item.trigger ? (
+                    <div className="mt-2">
+                      <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+                        Trigger: {item.trigger}
+                      </span>
+                    </div>
+                  ) : null}
 
                   <div className="mt-2 text-sm text-zinc-800">{item.message}</div>
 

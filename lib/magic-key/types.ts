@@ -27,6 +27,7 @@ export type ActivityItem = {
   id: string;
   createdAt: string;
   source: SyncSource | "system";
+  trigger?: string;
   message: string;
   details?: string[];
 };

@@ -14,6 +14,7 @@ export async function POST(request: Request) {
 
   await persistActivityForUser(user.id, {
     source: body.source,
+    trigger: typeof body.trigger === "string" ? body.trigger : undefined,
     message: body.message,
     details: Array.isArray(body.details) ? body.details.filter((item): item is string => typeof item === "string") : [],
   });

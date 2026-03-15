@@ -9,7 +9,7 @@ import { HeroSection } from "../components/magic-key/hero-section";
 import { MickeyRain } from "../components/magic-key/mickey-rain";
 import { TabsNav } from "../components/magic-key/tabs-nav";
 import { WatchlistSection } from "../components/magic-key/watchlist-section";
-import { ENDPOINT_URL, normalizeSupportedFrequency, PARK_OPTIONS, PASS_TYPES, POLL_MS, STATUS_META, STORAGE_KEY } from "../lib/magic-key/config";
+import { ENDPOINT_URL, FREQUENCIES, normalizeSupportedFrequency, PARK_OPTIONS, PASS_TYPES, POLL_MS, STATUS_META, STORAGE_KEY } from "../lib/magic-key/config";
 import type {
   ActivityItem,
   DashboardUserState,
@@ -101,6 +101,9 @@ export default function Home() {
 
   const syncLockRef = useRef(false);
   const watchItemsRef = useRef<WatchItem[]>([]);
+  const alertsEnabledRef = useRef(false);
+  const lastSyncAtRef = useRef("");
+  const sessionUserRef = useRef<SessionUser | null>(null);
   const importedLocalRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
   const passTypeSyncReadyRef = useRef(false);
@@ -108,6 +111,18 @@ export default function Home() {
   useEffect(() => {
     watchItemsRef.current = watchItems;
   }, [watchItems]);
+
+  useEffect(() => {
+    alertsEnabledRef.current = alertsEnabled;
+  }, [alertsEnabled]);
+
+  useEffect(() => {
+    lastSyncAtRef.current = lastSyncAt;
+  }, [lastSyncAt]);
+
+  useEffect(() => {
+    sessionUserRef.current = sessionUser;
+  }, [sessionUser]);
 
   const pushToast = useCallback((kind: "success" | "error", message: string) => {
     setToast({ kind, message });
@@ -117,20 +132,24 @@ export default function Home() {
     }, 3500);
   }, []);
 
-  const prependActivity = useCallback((source: SyncSource | "system", message: string, details?: string[]) => {
+  const prependActivity = useCallback(
+    (source: SyncSource | "system", message: string, details?: string[], trigger?: string) => {
     setActivity((current) =>
       pruneActivityItems([
         {
           id: crypto.randomUUID(),
           createdAt: new Date().toISOString(),
           source,
+          trigger,
           message,
           details,
         },
         ...current,
       ])
     );
-  }, []);
+    },
+    []
+  );
 
   const needsIosInstallForNotifications = needsIosHomeScreenNotifications();
   const notificationsSupported = canNotify();
@@ -372,7 +391,7 @@ export default function Home() {
   }, [hydrated, hasLoadedServerState, sessionUser, emailEnabled, emailAddress, alertsEnabled, pushEnabled, syncFrequency]);
 
   const syncFeed = useCallback(
-    async (source: SyncSource = "manual", logActivity = true) => {
+    async (source: SyncSource = "manual", logActivity = true, trigger = "") => {
       if (syncLockRef.current) return;
 
       syncLockRef.current = true;
@@ -392,7 +411,7 @@ export default function Home() {
         const rows: FeedRow[] = Array.isArray(rawRows) ? rawRows : [];
         const lookup = buildFeedLookup(rows);
         const nextMeta = syncMetaFromHeaders(response.headers);
-        const syncedAt = nextMeta.lastSuccessfulSyncAt || lastSyncAt;
+        const syncedAt = nextMeta.lastSuccessfulSyncAt || lastSyncAtRef.current;
 
         let changedCount = 0;
         const changedItems: Array<{
@@ -456,14 +475,15 @@ export default function Home() {
         setLastRunSummary(summary);
 
         if (logActivity && source !== "startup") {
-          prependActivity(source, summary, activityDetails);
+          prependActivity(source, summary, activityDetails, trigger);
 
-          if (sessionUser && source === "manual") {
+          if (sessionUserRef.current && source === "manual") {
             void fetch("/api/activity", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 source,
+                trigger,
                 message: summary,
                 details: activityDetails,
               }),
@@ -471,7 +491,7 @@ export default function Home() {
           }
         }
 
-        if (alertsEnabled && changedItems.length > 0 && canNotify() && Notification.permission === "granted") {
+        if (alertsEnabledRef.current && changedItems.length > 0 && canNotify() && Notification.permission === "granted") {
           const first = changedItems[0];
           const passName = PASS_TYPES.find((item) => item.id === first.passType)?.name ?? first.passType;
           const statusLabel = STATUS_META[first.status].compactLabel;
@@ -489,14 +509,15 @@ export default function Home() {
         setLastRunSummary(message);
 
         if (logActivity && source !== "startup") {
-          prependActivity("system", message);
+          prependActivity("system", message, [], trigger || "Sync request failed");
 
-          if (sessionUser && source === "manual") {
+          if (sessionUserRef.current && source === "manual") {
             void fetch("/api/activity", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 source: "system",
+                trigger: trigger || "Sync request failed",
                 message,
                 details: [],
               }),
@@ -512,20 +533,22 @@ export default function Home() {
         setIsSyncing(false);
       }
     },
-    [alertsEnabled, lastSyncAt, prependActivity, pushToast, sessionUser]
+    [prependActivity, pushToast]
   );
 
   useEffect(() => {
     if (!hydrated || hasStartedInitialSync) return;
     setHasStartedInitialSync(true);
-    void syncFeed("startup", false);
+    void syncFeed("startup", false, "Initial page load");
   }, [hydrated, hasStartedInitialSync, syncFeed]);
 
   useEffect(() => {
     if (!hydrated || syncFrequency === "manual") return;
+    const frequencyLabel =
+      FREQUENCIES.find((row) => row.value === syncFrequency)?.label.toLowerCase() ?? "scheduled refresh";
 
     const interval = window.setInterval(() => {
-      void syncFeed("auto", watchItemsRef.current.length > 0);
+      void syncFeed("auto", watchItemsRef.current.length > 0, `Scheduled ${frequencyLabel}`);
     }, POLL_MS[syncFrequency]);
 
     return () => window.clearInterval(interval);
@@ -538,7 +561,7 @@ export default function Home() {
       return;
     }
     if (document.visibilityState !== "visible") return;
-    void syncFeed("auto", false);
+    void syncFeed("auto", false, "Selected key changed");
   }, [hydrated, passType, syncFeed]);
 
   const summary = useMemo(() => {
@@ -1024,7 +1047,7 @@ export default function Home() {
             lastSyncAt={lastSyncAt}
             sessionEmail={sessionUser?.email ?? null}
             saveStatus={{ state: accountSaveState, message: accountSaveMessage }}
-            onManualSync={() => void syncFeed("manual", true)}
+            onManualSync={() => void syncFeed("manual", true, "Manual sync button")}
             onRemoveWatchItem={(id: string) => void removeWatchItem(id)}
           />
         )}
