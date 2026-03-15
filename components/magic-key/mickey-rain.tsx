@@ -57,8 +57,8 @@ function indexBias(a: MickeyParticle, b: MickeyParticle) {
   return a.opacity - b.opacity;
 }
 
-const DESKTOP_PARTICLES = buildParticles(46, 314159, false);
-const MOBILE_PARTICLES = buildParticles(22, 271828, true);
+const DESKTOP_PARTICLES = buildParticles(56, 314159, false);
+const MOBILE_PARTICLES = buildParticles(28, 271828, true);
 
 function particleStyle(particle: MickeyParticle): CSSProperties {
   return {
