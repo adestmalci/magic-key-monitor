@@ -3,7 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  --cursor-mickey: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath fill='%23000' d='M7.1 2.3a3.2 3.2 0 1 0 0 6.4a3.2 3.2 0 0 0 0-6.4Zm7.8 0a3.2 3.2 0 1 0 0 6.4a3.2 3.2 0 0 0 0-6.4ZM11 7.2c-3.7 0-6.7 3-6.7 6.7s3 6.7 6.7 6.7s6.7-3 6.7-6.7s-3-6.7-6.7-6.7Z'/%3E%3C/svg%3E");
+  --cursor-mickey: url("/branding/mickey-head-cursor.png");
 }
 
 @theme inline {
@@ -24,7 +24,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
-  cursor: var(--cursor-mickey) 11 8, auto;
+  cursor: var(--cursor-mickey) 9 7, auto;
   overflow-x: hidden;
 }
 
@@ -35,7 +35,7 @@ input,
 label,
 summary,
 [role="button"] {
-  cursor: var(--cursor-mickey) 11 8, pointer;
+  cursor: var(--cursor-mickey) 9 7, pointer;
 }
 
 .mickey-fall {

@@ -502,6 +502,7 @@ export async function createWatchItemForUser(
       item.passType === payload.passType &&
       item.preferredPark === payload.preferredPark
   );
+  const checkedAt = state.syncMeta.lastAttemptedSyncAt || state.syncMeta.lastSuccessfulSyncAt || now;
 
   if (duplicate) {
     return {
@@ -518,7 +519,7 @@ export async function createWatchItemForUser(
     preferredPark: payload.preferredPark,
     currentStatus: nextStatus,
     previousStatus: null,
-    lastCheckedAt: state.syncMeta.lastSuccessfulSyncAt || now,
+    lastCheckedAt: checkedAt,
     createdAt: now,
     updatedAt: now,
   };
@@ -573,7 +574,7 @@ export async function importWatchItemsForUser(userId: string, items: WatchItem[]
       preferredPark: item.preferredPark,
       currentStatus: resolveStatus(item, lookup),
       previousStatus: item.previousStatus ?? null,
-      lastCheckedAt: item.lastCheckedAt || state.syncMeta.lastSuccessfulSyncAt || now,
+      lastCheckedAt: item.lastCheckedAt || state.syncMeta.lastAttemptedSyncAt || state.syncMeta.lastSuccessfulSyncAt || now,
       createdAt: now,
       updatedAt: now,
     });
@@ -655,6 +656,8 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
   const state = await readBackendState();
   const lookup = buildFeedLookup(rows);
   const nowIso = new Date().toISOString();
+  const checkedAt =
+    state.syncMeta.lastAttemptedSyncAt || state.syncMeta.lastSuccessfulSyncAt || nowIso;
   const changesByUser = new Map<string, AlertChange[]>();
   const evaluatedUserIds: string[] = [];
 
@@ -679,7 +682,7 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
 
       item.previousStatus = nextStatus !== previousStatus ? previousStatus : item.previousStatus;
       item.currentStatus = nextStatus;
-      item.lastCheckedAt = state.syncMeta.lastSuccessfulSyncAt || nowIso;
+      item.lastCheckedAt = checkedAt;
       item.updatedAt = nowIso;
     }
 

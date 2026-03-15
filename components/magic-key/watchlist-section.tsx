@@ -148,7 +148,7 @@ export function WatchlistSection({
                       </div>
 
                       <div className="mt-5 text-sm text-zinc-500">
-                        Last updated: {formatSyncTime(item.lastCheckedAt || lastSyncAt)}
+                        Last checked: {formatSyncTime(item.lastCheckedAt || lastSyncAt)}
                       </div>
                     </div>
                   </article>

@@ -59,9 +59,11 @@ export function AddWatchForm({
 }) {
   const legend: StatusType[] = ["blocked", "unavailable", "dl", "dca", "either"];
   const selectionDisabled = selectedDateStatus === "blocked";
+  const checkedAt = syncMeta.lastAttemptedSyncAt || lastSyncAt;
   const modeLabel = syncMeta.stale ? "Showing last good snapshot" : "Live Disney mode";
+  const headlineLabel = syncMeta.stale ? "Last checked" : "Last live sync";
   const detailLabel = syncMeta.stale
-    ? "Live refresh missed a beat, so your latest good Disney snapshot is still in place."
+    ? `Checked ${formatSyncTime(checkedAt)}. Latest good live snapshot is ${formatSyncTime(lastSyncAt)}.`
     : "Latest Disney availability is loaded and ready for your watchlist.";
 
   function cellClasses(cell: Exclude<PickerCell, null>) {
@@ -243,8 +245,8 @@ export function AddWatchForm({
               </div>
             </div>
             <div className="flex min-h-[168px] flex-col items-center justify-center rounded-[24px] border border-zinc-200 bg-white/80 p-4 text-center shadow-sm shadow-zinc-200/50">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Last live sync</div>
-              <div className="mt-2 text-base font-semibold text-zinc-900">{formatSyncTime(lastSyncAt)}</div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{headlineLabel}</div>
+              <div className="mt-2 text-base font-semibold text-zinc-900">{formatSyncTime(checkedAt)}</div>
               <div className="mt-2 inline-flex rounded-full bg-violet-100 px-3 py-1 text-[11px] font-medium text-violet-800">
                 {modeLabel}
               </div>

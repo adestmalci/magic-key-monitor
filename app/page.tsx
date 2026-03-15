@@ -411,6 +411,7 @@ export default function Home() {
         const rows: FeedRow[] = Array.isArray(rawRows) ? rawRows : [];
         const lookup = buildFeedLookup(rows);
         const nextMeta = syncMetaFromHeaders(response.headers);
+        const attemptedAt = nextMeta.lastAttemptedSyncAt || new Date().toISOString();
         const syncedAt = nextMeta.lastSuccessfulSyncAt || lastSyncAtRef.current;
 
         let changedCount = 0;
@@ -447,7 +448,7 @@ export default function Home() {
               ...item,
               previousStatus: changed ? item.currentStatus : item.previousStatus,
               currentStatus: nextStatus,
-              lastCheckedAt: syncedAt || item.lastCheckedAt,
+              lastCheckedAt: attemptedAt || syncedAt || item.lastCheckedAt,
             };
           })
         );

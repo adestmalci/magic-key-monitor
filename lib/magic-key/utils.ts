@@ -176,7 +176,7 @@ export function syncMetaFromHeaders(headers: Headers): SyncMeta {
   const mode = headers.get("X-Magic-Key-Source");
   return {
     lastSuccessfulSyncAt: headers.get("X-Magic-Key-Last-Successful-Sync") || "",
-    lastAttemptedSyncAt: "",
+    lastAttemptedSyncAt: headers.get("X-Magic-Key-Last-Attempted-Sync") || "",
     mode: mode === "live-disney" || mode === "snapshot-fallback" || mode === "cached" ? mode : "snapshot-fallback",
     stale: headers.get("X-Magic-Key-Stale") === "1",
     message: headers.get("X-Magic-Key-Status") || "Pixie dust is standing by for the next live sync.",

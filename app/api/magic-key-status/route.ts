@@ -21,6 +21,7 @@ export async function GET(request: Request) {
     "Cache-Control": "no-store, max-age=0",
     "X-Magic-Key-Source": syncMeta.mode,
     "X-Magic-Key-Stale": syncMeta.stale ? "1" : "0",
+    "X-Magic-Key-Last-Attempted-Sync": syncMeta.lastAttemptedSyncAt || "",
     "X-Magic-Key-Last-Successful-Sync": syncMeta.lastSuccessfulSyncAt || "",
     "X-Magic-Key-Status": syncMeta.message,
   });
