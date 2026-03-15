@@ -6,7 +6,7 @@ import { ActivitySection } from "../components/magic-key/activity-section";
 import { AlertsSection } from "../components/magic-key/alerts-section";
 import { CalendarSection } from "../components/magic-key/calendar-section";
 import { HeroSection } from "../components/magic-key/hero-section";
-import { SummaryCards } from "../components/magic-key/summary-cards";
+import { MickeyRain } from "../components/magic-key/mickey-rain";
 import { TabsNav } from "../components/magic-key/tabs-nav";
 import { WatchlistSection } from "../components/magic-key/watchlist-section";
 import { ENDPOINT_URL, normalizeSupportedFrequency, PARK_OPTIONS, PASS_TYPES, POLL_MS, STATUS_META, STORAGE_KEY } from "../lib/magic-key/config";
@@ -163,6 +163,7 @@ export default function Home() {
       setSyncFrequency(normalizeSupportedFrequency(data.preferences.syncFrequency));
       setAuthEmail(data.user.email);
       setWatchItems(data.watchItems);
+      setActivity(pruneActivityItems(data.activity || []));
       setAccountSaveState("saved");
       setAccountSaveMessage(`Account settings are synced for ${data.user.email}.`);
     } else {
@@ -446,18 +447,27 @@ export default function Home() {
           changedCount === 0
             ? `${prefix} ${nextMeta.message}`
             : `${prefix} ${changedCount} watched ${changedCount === 1 ? "date changed" : "dates changed"}. ${nextMeta.message}`;
+        const activityDetails = changedItems.map((item) => {
+          const passName = PASS_TYPES.find((row) => row.id === item.passType)?.name ?? item.passType;
+          return `${passName} • ${formatWatchDate(item.date)} • ${STATUS_META[item.previousStatus].compactLabel} -> ${STATUS_META[item.status].compactLabel}`;
+        });
 
         setLastRunSummary(summary);
 
         if (logActivity && source !== "startup") {
-          prependActivity(
-            source,
-            summary,
-            changedItems.map((item) => {
-              const passName = PASS_TYPES.find((row) => row.id === item.passType)?.name ?? item.passType;
-              return `${passName} • ${formatWatchDate(item.date)} • ${STATUS_META[item.previousStatus].compactLabel} -> ${STATUS_META[item.status].compactLabel}`;
-            })
-          );
+          prependActivity(source, summary, activityDetails);
+
+          if (sessionUser && source === "manual") {
+            void fetch("/api/activity", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                source,
+                message: summary,
+                details: activityDetails,
+              }),
+            }).catch(() => undefined);
+          }
         }
 
         if (alertsEnabled && changedItems.length > 0 && canNotify() && Notification.permission === "granted") {
@@ -479,6 +489,18 @@ export default function Home() {
 
         if (logActivity && source !== "startup") {
           prependActivity("system", message);
+
+          if (sessionUser && source === "manual") {
+            void fetch("/api/activity", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                source: "system",
+                message,
+                details: [],
+              }),
+            }).catch(() => undefined);
+          }
         }
 
         if (source === "manual") {
@@ -489,7 +511,7 @@ export default function Home() {
         setIsSyncing(false);
       }
     },
-    [alertsEnabled, lastSyncAt, prependActivity, pushToast]
+    [alertsEnabled, lastSyncAt, prependActivity, pushToast, sessionUser]
   );
 
   useEffect(() => {
@@ -686,6 +708,20 @@ export default function Home() {
       [`Check frequency • ${nextFrequency}`]
     );
 
+    if (sessionUser) {
+      void fetch("/api/activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "system",
+          message: `Added watched date: ${formatWatchDate(nextItem.date)} • ${
+            PASS_TYPES.find((item) => item.id === passType)?.name
+          } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`,
+          details: [`Check frequency • ${nextFrequency}`],
+        }),
+      }).catch(() => undefined);
+    }
+
     pushToast("success", sessionUser ? "Watched date saved to your account." : "Watched date added.");
   }, [feedRows, lastSyncAt, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
 
@@ -725,6 +761,20 @@ export default function Home() {
             PASS_TYPES.find((row) => row.id === item.passType)?.name
           }`
         );
+
+        if (sessionUser) {
+          void fetch("/api/activity", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              source: "system",
+              message: `Removed watched date: ${formatWatchDate(item.date)} • ${
+                PASS_TYPES.find((row) => row.id === item.passType)?.name
+              }`,
+              details: [],
+            }),
+          }).catch(() => undefined);
+        }
       }
     },
     [watchItems, prependActivity, pushToast, sessionUser]
@@ -919,8 +969,9 @@ export default function Home() {
   ];
 
   return (
-    <main className="min-h-screen bg-zinc-50 text-zinc-950">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-8 md:px-8 lg:px-10">
+    <main className="relative min-h-screen bg-transparent text-zinc-950">
+      <MickeyRain />
+      <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-8 md:px-8 lg:px-10">
         <section>
           <HeroSection />
         </section>
@@ -943,13 +994,12 @@ export default function Home() {
             onPreviousMonth={() => setPickerMonth(previousMonthKey(pickerMonth))}
             onNextMonth={() => setPickerMonth(nextMonthKey(pickerMonth))}
             watchCount={watchItems.length}
+            summary={summary}
             lastSyncAt={lastSyncAt}
             syncMeta={syncMeta}
             onAddWatchItem={() => void addWatchItem()}
           />
         </section>
-
-        <SummaryCards summary={summary} />
 
         <TabsNav activeTab={activeTab} tabs={tabs} onTabChange={setActiveTab} />
 

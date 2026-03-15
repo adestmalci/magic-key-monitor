@@ -27,6 +27,7 @@ export function AddWatchForm({
   onPreviousMonth,
   onNextMonth,
   watchCount,
+  summary,
   lastSyncAt,
   syncMeta,
   onAddWatchItem,
@@ -47,6 +48,11 @@ export function AddWatchForm({
   onPreviousMonth: () => void;
   onNextMonth: () => void;
   watchCount: number;
+  summary: {
+    available: number;
+    unavailable: number;
+    blocked: number;
+  };
   lastSyncAt: string;
   syncMeta: SyncMeta;
   onAddWatchItem: () => void;
@@ -59,13 +65,10 @@ export function AddWatchForm({
     : "Latest Disney availability is loaded and ready for your watchlist.";
 
   function cellClasses(cell: Exclude<PickerCell, null>) {
-    const base = "min-h-[62px] rounded-[22px] border px-2.5 py-2.5 text-left transition sm:min-h-[68px]";
+    const base = "min-h-[58px] rounded-[20px] border px-2 py-2 text-left transition sm:min-h-[68px] sm:rounded-[22px] sm:px-2.5 sm:py-2.5";
 
     if (cell.disabled) {
-      return classNames(
-        base,
-        "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
-      );
+      return classNames(base, "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400");
     }
 
     if (cell.selected) {
@@ -88,13 +91,45 @@ export function AddWatchForm({
   }
 
   return (
-    <div className="rounded-[36px] border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
-      <div className="mb-4 flex flex-col gap-1">
-        <div className="text-lg font-semibold text-zinc-900">Add watched date</div>
-        <div className="text-sm text-zinc-500">Choose a key, then pick a date from the calendar.</div>
+    <>
+      <div className="rounded-[30px] border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-lg font-semibold text-zinc-900">Choose your key</div>
+            <div className="text-sm text-zinc-500">Pick the Magic Key first so the calendar below can match it.</div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+          {PASS_TYPES.map((pass) => (
+            <button
+              key={pass.id}
+              type="button"
+              onClick={() => onPassTypeChange(pass.id)}
+              className={classNames(
+                "rounded-[22px] border px-3 py-2.5 text-center transition",
+                passType === pass.id
+                  ? "border-violet-400 bg-violet-50 shadow-sm"
+                  : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50"
+              )}
+            >
+              <div className="mx-auto flex h-8 w-8 items-center justify-center">
+                <img src={pass.iconPath} alt={pass.name} className="h-7 w-7 object-contain" />
+              </div>
+              <div className="mt-2 text-sm font-medium text-zinc-900">{pass.short}</div>
+              <div className="text-xs text-zinc-500">Key</div>
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_320px]">
+      <div className="mt-4 rounded-[36px] border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="mb-4 flex flex-col gap-1">
+          <div className="text-lg font-semibold text-zinc-900">Add watched date</div>
+          <div className="text-sm text-zinc-500">Choose a date from the calendar, then save the watch below.</div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_320px]">
         <div className="rounded-[30px] border border-zinc-200 bg-zinc-50/80 p-3.5 sm:p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-medium text-zinc-700">Choose a date</div>
@@ -126,7 +161,7 @@ export function AddWatchForm({
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-7 gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <div className="mt-4 grid grid-cols-7 gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-zinc-500 sm:gap-2 sm:text-[10px] sm:tracking-[0.18em]">
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
               <div key={label} className="px-1 py-1 text-center">
                 {label}
@@ -134,12 +169,12 @@ export function AddWatchForm({
             ))}
           </div>
 
-          <div className="mt-1 grid gap-2">
+          <div className="mt-1 grid gap-1.5 sm:gap-2">
             {pickerRows.map((row, rowIndex) => (
-              <div key={rowIndex} className="grid grid-cols-7 gap-2">
+              <div key={rowIndex} className="grid grid-cols-7 gap-1.5 sm:gap-2">
                 {row.map((cell, cellIndex) => {
                   if (!cell) {
-                    return <div key={`${rowIndex}-${cellIndex}`} className="min-h-[62px] sm:min-h-[68px]" />;
+                    return <div key={`${rowIndex}-${cellIndex}`} className="min-h-[58px] sm:min-h-[68px]" />;
                   }
 
                   return (
@@ -150,10 +185,10 @@ export function AddWatchForm({
                       onClick={() => onDateInputChange(cell.date)}
                       className={cellClasses(cell)}
                     >
-                      <div className="text-base font-semibold sm:text-[17px]">{cell.day}</div>
+                      <div className="text-sm font-semibold sm:text-[17px]">{cell.day}</div>
                       <div
                         className={classNames(
-                          "mt-2 flex items-center justify-center",
+                          "mt-1.5 flex items-center justify-center sm:mt-2",
                           cell.selected ? "text-white/90" : cell.disabled ? "text-slate-400" : "text-current"
                         )}
                       >
@@ -193,11 +228,21 @@ export function AddWatchForm({
           </div>
 
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div className="flex min-h-[150px] flex-col items-center justify-center rounded-[24px] border border-zinc-200 bg-white/80 p-4 text-center shadow-sm shadow-zinc-200/50">
+            <div className="rounded-[24px] border border-zinc-200 bg-white/80 p-4 text-center shadow-sm shadow-zinc-200/50">
               <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Tracked dates</div>
               <div className="mt-2 text-3xl font-semibold text-zinc-900">{watchCount}</div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-left text-xs text-emerald-900">
+                  <div className="font-semibold">Dates with availability</div>
+                  <div className="mt-1 text-lg font-semibold">{summary.available}</div>
+                </div>
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-xs text-zinc-700">
+                  <div className="font-semibold">No reservations available</div>
+                  <div className="mt-1 text-lg font-semibold">{summary.unavailable}</div>
+                </div>
+              </div>
             </div>
-            <div className="flex min-h-[150px] flex-col items-center justify-center rounded-[24px] border border-zinc-200 bg-white/80 p-4 text-center shadow-sm shadow-zinc-200/50">
+            <div className="flex min-h-[168px] flex-col items-center justify-center rounded-[24px] border border-zinc-200 bg-white/80 p-4 text-center shadow-sm shadow-zinc-200/50">
               <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Last live sync</div>
               <div className="mt-2 text-base font-semibold text-zinc-900">{formatSyncTime(lastSyncAt)}</div>
               <div className="mt-2 inline-flex rounded-full bg-violet-100 px-3 py-1 text-[11px] font-medium text-violet-800">
@@ -209,31 +254,6 @@ export function AddWatchForm({
         </div>
 
         <aside className="grid content-start gap-3">
-          <div className="rounded-[28px] border border-zinc-200 bg-zinc-50/80 p-3.5">
-            <div className="text-sm font-medium text-zinc-700">Choose your key</div>
-            <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-5 xl:grid-cols-2">
-              {PASS_TYPES.map((pass) => (
-                <button
-                  key={pass.id}
-                  type="button"
-                  onClick={() => onPassTypeChange(pass.id)}
-                  className={classNames(
-                    "rounded-[22px] border px-3 py-2.5 text-center transition",
-                    passType === pass.id
-                      ? "border-violet-400 bg-violet-50 shadow-sm"
-                      : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50"
-                  )}
-                >
-                  <div className="mx-auto flex h-8 w-8 items-center justify-center">
-                    <img src={pass.iconPath} alt={pass.name} className="h-7 w-7 object-contain" />
-                  </div>
-                  <div className="mt-2 text-sm font-medium text-zinc-900">{pass.short}</div>
-                  <div className="text-xs text-zinc-500">Key</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div
             className={classNames(
               "rounded-[24px] border px-4 py-3 text-sm",
@@ -299,7 +319,8 @@ export function AddWatchForm({
             Add watched date
           </button>
         </aside>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

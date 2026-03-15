@@ -4,6 +4,7 @@ import { normalizeSupportedFrequency } from "./config";
 import { getDataPath, readStoredValue, writeStoredValue } from "./storage";
 import { buildFeedLookup, resolveStatus } from "./utils";
 import type {
+  ActivityItem,
   DashboardUserState,
   FeedRow,
   FrequencyType,
@@ -52,11 +53,16 @@ type PushSubscriptionRecord = {
   updatedAt: string;
 };
 
+type StoredActivityItem = ActivityItem & {
+  userId: string;
+};
+
 type BackendState = {
   version: number;
   users: StoredUser[];
   preferences: StoredPreferences[];
   watchItems: StoredWatchItem[];
+  activity: StoredActivityItem[];
   magicLinks: MagicLinkRecord[];
   pushSubscriptions: PushSubscriptionRecord[];
   syncMeta: SyncMeta;
@@ -72,6 +78,8 @@ const STATE_PATH = getDataPath("magic-key-backend.json");
 const FEED_PATH = getDataPath("magic-key-feed.json");
 const SESSION_COOKIE = "magic_key_session";
 const MAGIC_LINK_RETENTION_MS = 1000 * 60 * 60 * 24 * 7;
+const ACTIVITY_RETENTION_MS = 1000 * 60 * 60 * 6;
+const MAX_ACTIVITY_ITEMS_PER_USER = 40;
 
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
@@ -98,6 +106,7 @@ function defaultState(): BackendState {
     users: [],
     preferences: [],
     watchItems: [],
+    activity: [],
     magicLinks: [],
     pushSubscriptions: [],
     syncMeta: DEFAULT_SYNC_META,
@@ -121,9 +130,26 @@ function pruneMagicLinks(records: MagicLinkRecord[], now = Date.now()) {
   });
 }
 
+function pruneActivityItems(records: StoredActivityItem[], now = Date.now()) {
+  const filtered = records.filter((record) => {
+    const createdAt = Date.parse(record.createdAt);
+    return Number.isFinite(createdAt) && now - createdAt <= ACTIVITY_RETENTION_MS;
+  });
+
+  const counts = new Map<string, number>();
+  return filtered
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .filter((record) => {
+      const nextCount = (counts.get(record.userId) ?? 0) + 1;
+      counts.set(record.userId, nextCount);
+      return nextCount <= MAX_ACTIVITY_ITEMS_PER_USER;
+    });
+}
+
 function pruneBackendState(state: BackendState): BackendState {
   return {
     ...state,
+    activity: pruneActivityItems(state.activity),
     magicLinks: pruneMagicLinks(state.magicLinks),
   };
 }
@@ -195,6 +221,7 @@ export async function readBackendState(): Promise<BackendState> {
     users: Array.isArray(parsed.users) ? parsed.users : [],
     preferences: Array.isArray(parsed.preferences) ? parsed.preferences : [],
     watchItems: Array.isArray(parsed.watchItems) ? parsed.watchItems : [],
+    activity: pruneActivityItems(Array.isArray(parsed.activity) ? parsed.activity : []),
     magicLinks: pruneMagicLinks(Array.isArray(parsed.magicLinks) ? parsed.magicLinks : []),
     pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
   };
@@ -257,6 +284,28 @@ export function getPreferencesFromState(state: BackendState, userId: string): St
 
 export function getWatchItemsForUser(state: BackendState, userId: string) {
   return state.watchItems.filter((item) => item.userId === userId);
+}
+
+export function getActivityForUser(state: BackendState, userId: string) {
+  return state.activity
+    .filter((item) => item.userId === userId)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+export function recordActivityForUser(
+  state: BackendState,
+  userId: string,
+  entry: Pick<ActivityItem, "source" | "message" | "details"> & { createdAt?: string }
+) {
+  state.activity.unshift({
+    id: randomUUID(),
+    userId,
+    createdAt: entry.createdAt || new Date().toISOString(),
+    source: entry.source,
+    message: entry.message,
+    details: entry.details,
+  });
+  state.activity = pruneActivityItems(state.activity);
 }
 
 export async function getSessionUser() {
@@ -374,6 +423,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       user: null,
       preferences: defaultPreferences(),
       watchItems: [],
+      activity: [],
       syncMeta: state.syncMeta,
       pushPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
     };
@@ -397,6 +447,13 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       currentStatus: item.currentStatus,
       previousStatus: item.previousStatus,
       lastCheckedAt: item.lastCheckedAt,
+    })),
+    activity: getActivityForUser(state, user.id).map((item) => ({
+      id: item.id,
+      createdAt: item.createdAt,
+      source: item.source,
+      message: item.message,
+      details: item.details,
     })),
     syncMeta: state.syncMeta,
     pushPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
@@ -598,6 +655,7 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
   const lookup = buildFeedLookup(rows);
   const nowIso = new Date().toISOString();
   const changesByUser = new Map<string, AlertChange[]>();
+  const evaluatedUserIds: string[] = [];
 
   for (const user of state.users) {
     const preferences = getPreferencesFromState(state, user.id);
@@ -608,6 +666,7 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
 
     const items = getWatchItemsForUser(state, user.id);
     const userChanges: AlertChange[] = [];
+    evaluatedUserIds.push(user.id);
 
     for (const item of items) {
       const nextStatus = resolveStatus(item, lookup);
@@ -631,5 +690,14 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
   }
 
   await writeBackendState(state);
-  return { state, changesByUser };
+  return { state, changesByUser, evaluatedUserIds };
+}
+
+export async function persistActivityForUser(
+  userId: string,
+  entry: Pick<ActivityItem, "source" | "message" | "details"> & { createdAt?: string }
+) {
+  const state = await readBackendState();
+  recordActivityForUser(state, userId, entry);
+  await writeBackendState(state);
 }

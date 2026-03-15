@@ -68,6 +68,7 @@ export type DashboardUserState = {
   user: SessionUser | null;
   preferences: UserPreferences;
   watchItems: WatchItem[];
+  activity: ActivityItem[];
   syncMeta: SyncMeta;
   pushPublicKey: string;
 };

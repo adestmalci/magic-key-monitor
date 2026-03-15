@@ -58,6 +58,26 @@ export function AlertsSection({
   onSendTestPush: () => void | Promise<void>;
 }) {
   const emailTarget = emailAddress || user?.email || "";
+  const notificationsButtonLabel = notificationsGranted ? "Notifications enabled" : "Enable notifications";
+  const notificationStatusTone = pushEnabled
+    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+    : notificationsGranted
+      ? "border-violet-200 bg-violet-50 text-violet-900"
+      : "border-zinc-200 bg-white text-zinc-700";
+  const notificationStatusMessage = pushEnabled
+    ? "Closed-app push is ready on this device."
+    : !notificationsSupported
+      ? notificationsStatusMessage
+      : !user
+        ? "Notifications are on here. Sign in if you want this device to receive closed-app background alerts."
+        : !pushSupported
+          ? "Notifications are on, but this browser cannot save a closed-app push subscription."
+        : !pushConfigured
+          ? "Notifications are allowed, but background push still needs app push configuration."
+          : notificationsGranted
+            ? "Notifications are allowed. We will finish background push as soon as this device saves its subscription."
+            : "Notifications are not enabled yet on this device.";
+  const emailToggleLabel = emailEnabled ? "Email alerts on" : "Turn on email alerts";
 
   return (
     <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
@@ -153,15 +173,32 @@ export function AlertsSection({
               Use this email for watched-date changes. Sign in if you want the address and preference to stay attached to your account everywhere.
             </p>
 
-            <label className="mt-4 flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
-              <input
-                type="checkbox"
-                checked={emailEnabled}
-                onChange={(event) => onEmailEnabledChange(event.target.checked)}
-                className="h-4 w-4 rounded border-zinc-300 text-violet-600"
-              />
-              Send me an email when watched dates change
-            </label>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => onEmailEnabledChange(!emailEnabled)}
+                className={classNames(
+                  "inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm font-semibold transition",
+                  emailEnabled
+                    ? "border border-violet-200 bg-violet-600 text-white"
+                    : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                )}
+              >
+                <Mail className="h-4 w-4" />
+                {emailToggleLabel}
+              </button>
+
+              <div
+                className={classNames(
+                  "inline-flex h-11 items-center rounded-2xl border px-4 text-sm",
+                  emailEnabled
+                    ? "border-violet-200 bg-violet-50 text-violet-900"
+                    : "border-zinc-200 bg-white text-zinc-700"
+                )}
+              >
+                {emailEnabled ? "Email delivery is active" : "Email delivery is paused"}
+              </div>
+            </div>
 
             <label className="mt-4 grid gap-2">
               <span className="text-sm text-zinc-700">Delivery email</span>
@@ -187,17 +224,6 @@ export function AlertsSection({
                 <Mail className="h-4 w-4" />
                 {isSendingTestEmail ? "Sending..." : "Send test email"}
               </button>
-
-              <div
-                className={classNames(
-                  "inline-flex h-11 items-center rounded-2xl border px-4 text-sm",
-                  emailEnabled
-                    ? "border-violet-200 bg-violet-50 text-violet-900"
-                    : "border-zinc-200 bg-white text-zinc-700"
-                )}
-              >
-                {emailEnabled ? "Email alerts enabled" : "Email alerts are currently off"}
-              </div>
             </div>
           </div>
         </div>
@@ -206,31 +232,33 @@ export function AlertsSection({
           <div className="rounded-[28px] border border-zinc-200 bg-zinc-50 p-5">
             <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
               <Bell className="h-4 w-4 text-violet-600" />
-              Browser notifications
+              Notifications
             </div>
             <p className="mt-2 text-sm text-zinc-500">
-              These work on this browser when you grant permission. They are useful for active sessions even if you are not signed in.
+              One permission flow handles both local browser notifications and, when possible, closed-app push on this signed-in device.
             </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={requestNotifications}
-                disabled={!notificationsSupported}
-                className="inline-flex h-11 items-center gap-2 rounded-2xl bg-violet-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className={classNames(
+                  "inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm font-semibold transition",
+                  notificationsGranted
+                    ? "border border-violet-200 bg-violet-600 text-white"
+                    : "bg-violet-600 text-white hover:opacity-95"
+                )}
               >
                 <Bell className="h-4 w-4" />
-                {notificationsGranted ? "Notifications enabled" : "Enable notifications"}
+                {notificationsButtonLabel}
               </button>
               <div
                 className={classNames(
                   "inline-flex h-11 items-center rounded-2xl border px-4 text-sm",
-                  notificationsGranted
-                    ? "border-violet-200 bg-violet-50 text-violet-900"
-                    : "border-zinc-200 bg-white text-zinc-700"
+                  notificationStatusTone
                 )}
               >
-                {notificationsStatusMessage}
+                {notificationStatusMessage}
               </div>
             </div>
 
@@ -242,48 +270,11 @@ export function AlertsSection({
 
             {alertsEnabled && notificationsGranted ? (
               <div className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
-                Local in-browser alerts are on. These can still appear while this tab is open even if you are not signed in.
+                {pushEnabled
+                  ? "This device is registered for closed-app push, so watched-date changes can reach you even when the site is closed."
+                  : "Local browser alerts are on. If you are signed in and push is configured, this device will also finish closed-app push setup automatically."}
               </div>
             ) : null}
-          </div>
-
-          <div className="rounded-[28px] border border-zinc-200 bg-zinc-50 p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
-              <Smartphone className="h-4 w-4 text-violet-600" />
-              Background push
-            </div>
-            <p className="mt-2 text-sm text-zinc-500">
-              Closed-app push needs a signed-in account, a supported browser, notification permission, and a registered push subscription on this device. Some phones may also require adding the app to the home screen first.
-            </p>
-
-            <div
-              className={classNames(
-                "mt-4 rounded-2xl border px-4 py-3 text-sm",
-                pushEnabled
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                  : !user
-                    ? "border-amber-200 bg-amber-50 text-amber-900"
-                    : !pushSupported
-                      ? "border-zinc-200 bg-white text-zinc-700"
-                      : !pushConfigured
-                        ? "border-zinc-200 bg-white text-zinc-700"
-                        : notificationsGranted
-                          ? "border-zinc-200 bg-white text-zinc-700"
-                          : "border-amber-200 bg-amber-50 text-amber-900"
-              )}
-            >
-              {pushEnabled
-                ? "Background push is ready on this browser."
-                : !user
-                  ? "Sign in first if you want this device to participate in background push delivery."
-                  : !pushSupported
-                    ? "This browser does not support web push subscriptions."
-                    : !pushConfigured
-                      ? "Push delivery is missing VAPID configuration in the app environment."
-                      : notificationsGranted
-                        ? "Notifications are allowed, but this device still needs a saved push subscription."
-                        : "Enable browser notifications first so this device can finish push setup."}
-            </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
@@ -304,7 +295,15 @@ export function AlertsSection({
                     : "border-zinc-200 bg-white text-zinc-700"
                 )}
               >
-                {pushEnabled ? "This device is subscribed for push" : "No saved push subscription yet"}
+                {pushEnabled
+                  ? "Closed-app push is active on this device"
+                  : !user
+                    ? "Sign in to connect this device to background push"
+                    : !pushSupported
+                      ? "This browser cannot save a web push subscription"
+                      : !pushConfigured
+                        ? "Push env vars still need to be configured"
+                        : "This device has not saved a push subscription yet"}
               </div>
             </div>
           </div>
