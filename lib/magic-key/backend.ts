@@ -914,9 +914,9 @@ export async function upsertPreferencesForUser(
   importedDisneyMembers: ImportedDisneyMember[];
   savedReservationParties: SavedReservationParty[];
 }> {
-  const state = await readBackendState();
-  const preferences = getPreferencesFromState(state, userId);
-  const user = getUserFromState(state, userId);
+  const workingState = await readBackendState();
+  const preferences = getPreferencesFromState(workingState, userId);
+  const user = getUserFromState(workingState, userId);
 
   preferences.emailEnabled = patch.emailEnabled ?? preferences.emailEnabled;
   preferences.emailAddress = patch.emailAddress ?? preferences.emailAddress;
@@ -955,7 +955,23 @@ export async function upsertPreferencesForUser(
       ? normalizeSavedReservationParties(preferences.savedReservationParties)
       : normalizeSavedReservationParties(patch.savedReservationParties);
 
-  await writeBackendState(state);
+  // Preference autosaves should not clobber planner-hub jobs/secrets written by
+  // adjacent Disney connect/import requests. Reapply the patched preferences onto
+  // the freshest state snapshot right before writing.
+  const latestState = await readBackendState();
+  const latestPreferences = getPreferencesFromState(latestState, userId);
+  latestPreferences.emailEnabled = preferences.emailEnabled;
+  latestPreferences.emailAddress = preferences.emailAddress;
+  latestPreferences.alertsEnabled = preferences.alertsEnabled;
+  latestPreferences.pushEnabled = preferences.pushEnabled;
+  latestPreferences.syncFrequency = preferences.syncFrequency;
+  latestPreferences.reservationAssist = preferences.reservationAssist;
+  latestPreferences.plannerHubBooking = preferences.plannerHubBooking;
+  latestPreferences.plannerHubConnection = preferences.plannerHubConnection;
+  latestPreferences.importedDisneyMembers = preferences.importedDisneyMembers;
+  latestPreferences.savedReservationParties = preferences.savedReservationParties;
+
+  await writeBackendState(latestState);
 
   return {
     preferences: {
