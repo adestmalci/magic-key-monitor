@@ -282,7 +282,8 @@ async function handleImport(job, payload) {
 }
 
 async function run() {
-  log("starting", { appUrl: APP_URL, expectJob: process.env.WORKER_EXPECT_JOB === "1" });
+  const expectJob = process.env.WORKER_EXPECT_JOB === "1";
+  log("starting", { appUrl: APP_URL, expectJob });
   while (true) {
     const claimed = await api("/api/disney/worker/claim", { method: "POST" });
     log("claim response", {
@@ -293,7 +294,7 @@ async function run() {
     });
 
     if (!claimed?.job) {
-      if (process.env.WORKER_EXPECT_JOB === "1") {
+      if (expectJob) {
         throw new Error(
           `Expected a planner-hub job on ${APP_URL}, but claim returned none. Diagnostics: ${JSON.stringify(
             claimed?.diagnostics || {}
@@ -348,6 +349,17 @@ async function run() {
       status: result.status,
       reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
     });
+
+    if (expectJob) {
+      if (!result.ok) {
+        throw new Error(
+          `Disney worker processed job ${claimed.job.id} but ended in ${result.status}: ${
+            result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "Unknown reason."
+          }`
+        );
+      }
+      break;
+    }
   }
 }
 
