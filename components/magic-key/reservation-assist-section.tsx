@@ -318,9 +318,13 @@ export function ReservationAssistSection({
   const backgroundCheckedAt = syncMeta.lastBackgroundRunAt;
   const lastWorkerPollAt = syncMeta.lastWorkerPollAt;
   const latestQueueAt = reservationAssist.lastVerifiedAt;
+  const hasClaimedJob = Boolean(plannerHubConnection.lastClaimedJobId);
+  const hasReportedJob = Boolean(plannerHubConnection.lastReportedJobId);
   const workerHasCheckedInSinceQueue =
-    Boolean(lastWorkerPollAt && latestQueueAt) &&
-    new Date(lastWorkerPollAt).getTime() >= new Date(latestQueueAt).getTime();
+    hasClaimedJob ||
+    hasReportedJob ||
+    (Boolean(lastWorkerPollAt && latestQueueAt) &&
+      new Date(lastWorkerPollAt).getTime() >= new Date(latestQueueAt).getTime());
   const connectionSteps = [
     {
       label: "Request queued",
@@ -330,8 +334,12 @@ export function ReservationAssistSection({
     {
       label: "Worker check-in",
       complete: workerHasCheckedInSinceQueue,
-      detail: lastWorkerPollAt
-        ? `${formatSyncTime(lastWorkerPollAt)} • ${syncMeta.lastWorkerPollMessage || "Worker checked in."}`
+      detail: hasReportedJob
+        ? `Worker claimed and reported job ${plannerHubConnection.lastReportedJobId}.`
+        : hasClaimedJob
+          ? `Worker claimed job ${plannerHubConnection.lastClaimedJobId}.`
+          : lastWorkerPollAt
+            ? `${formatSyncTime(lastWorkerPollAt)} • ${syncMeta.lastWorkerPollMessage || "Worker checked in."}`
         : "No worker check-in recorded yet for this backend.",
     },
     {

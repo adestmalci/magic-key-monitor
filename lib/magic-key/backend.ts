@@ -917,6 +917,7 @@ export async function upsertPreferencesForUser(
   const workingState = await readBackendState();
   const preferences = getPreferencesFromState(workingState, userId);
   const user = getUserFromState(workingState, userId);
+  const currentConnection = preferences.plannerHubConnection;
 
   preferences.emailEnabled = patch.emailEnabled ?? preferences.emailEnabled;
   preferences.emailAddress = patch.emailAddress ?? preferences.emailAddress;
@@ -936,20 +937,20 @@ export async function upsertPreferencesForUser(
   });
   preferences.plannerHubConnection = normalizePlannerHubConnection(
     {
-      ...preferences.plannerHubConnection,
-      ...(patch.plannerHubConnection ?? {}),
+      ...currentConnection,
+      plannerHubId: patch.plannerHubConnection?.plannerHubId ?? currentConnection.plannerHubId,
+      disneyEmail: patch.plannerHubConnection?.disneyEmail ?? currentConnection.disneyEmail,
     },
     patch.plannerHubConnection?.disneyEmail ??
       patch.reservationAssist?.plannerHubEmail ??
       user?.email ??
-      preferences.plannerHubConnection?.disneyEmail ??
+      currentConnection?.disneyEmail ??
       preferences.reservationAssist?.plannerHubEmail ??
       ""
   );
-  preferences.importedDisneyMembers =
-    patch.importedDisneyMembers === undefined
-      ? normalizeImportedDisneyMembers(preferences.importedDisneyMembers)
-      : normalizeImportedDisneyMembers(patch.importedDisneyMembers);
+  // Imported members are worker-owned. Keep the freshest backend copy instead of
+  // letting autosaved client state erase an import result that just landed.
+  preferences.importedDisneyMembers = normalizeImportedDisneyMembers(preferences.importedDisneyMembers);
   preferences.savedReservationParties =
     patch.savedReservationParties === undefined
       ? normalizeSavedReservationParties(preferences.savedReservationParties)

@@ -331,6 +331,7 @@ async function run() {
       jobType: claimed.job.type,
       ok: result.ok,
       status: result.status,
+      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
     });
     await api("/api/disney/worker/report", {
       method: "POST",
@@ -345,6 +346,7 @@ async function run() {
       jobType: claimed.job.type,
       ok: result.ok,
       status: result.status,
+      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
     });
   }
 }
