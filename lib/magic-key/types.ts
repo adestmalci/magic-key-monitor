@@ -158,6 +158,10 @@ export type SavedReservationParty = {
 export type SyncMeta = {
   lastSuccessfulSyncAt: string;
   lastAttemptedSyncAt: string;
+  lastBackgroundRunAt: string;
+  lastBackgroundRunMessage: string;
+  lastWorkerPollAt: string;
+  lastWorkerPollMessage: string;
   mode: SyncMode;
   stale: boolean;
   message: string;

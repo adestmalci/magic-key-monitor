@@ -139,6 +139,10 @@ const PLANNER_HUB_JOB_STALE_MS = 1000 * 60 * 10;
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
   lastAttemptedSyncAt: "",
+  lastBackgroundRunAt: "",
+  lastBackgroundRunMessage: "",
+  lastWorkerPollAt: "",
+  lastWorkerPollMessage: "",
   mode: "snapshot-fallback",
   stale: false,
   message: "Pixie dust is standing by for the next live sync.",
@@ -1420,8 +1424,17 @@ export async function queuePlannerHubImportJob(userId: string) {
 
 export async function claimNextPlannerHubJob() {
   const state = await readBackendState();
+  const pollAt = new Date().toISOString();
   let job: PlannerHubJobRecord | undefined = state.plannerHubJobs.find((entry) => entry.status === "pending");
-  if (!job) return null;
+  if (!job) {
+    state.syncMeta = {
+      ...state.syncMeta,
+      lastWorkerPollAt: pollAt,
+      lastWorkerPollMessage: "Disney worker checked in, but no queued planner-hub job was waiting.",
+    };
+    await writeBackendState(state);
+    return null;
+  }
 
   if (job.type === "connect") {
     const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
@@ -1447,7 +1460,15 @@ export async function claimNextPlannerHubJob() {
       );
       await writeBackendState(state);
       job = state.plannerHubJobs.find((entry) => entry.status === "pending");
-      if (!job) return null;
+      if (!job) {
+        state.syncMeta = {
+          ...state.syncMeta,
+          lastWorkerPollAt: pollAt,
+          lastWorkerPollMessage: "Disney worker checked in, but the queued planner-hub password handoff had already expired.",
+        };
+        await writeBackendState(state);
+        return null;
+      }
     }
   }
 
@@ -1456,6 +1477,11 @@ export async function claimNextPlannerHubJob() {
   job.status = "processing";
   job.claimedAt = new Date().toISOString();
   job.attempts += 1;
+  state.syncMeta = {
+    ...state.syncMeta,
+    lastWorkerPollAt: pollAt,
+    lastWorkerPollMessage: `Disney worker claimed the queued ${job.type} job for ${job.disneyEmail || "the planner hub"}.`,
+  };
 
   const preferences = getPreferencesFromState(state, job.userId);
   const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
@@ -1567,6 +1593,13 @@ export async function completePlannerHubJob(
   job.status = payload.ok ? "completed" : "failed";
   job.completedAt = now;
   job.lastError = payload.ok ? "" : payload.lastAuthFailureReason || payload.lastRequiredActionMessage || "Planner hub worker failed.";
+  state.syncMeta = {
+    ...state.syncMeta,
+    lastWorkerPollAt: now,
+    lastWorkerPollMessage: payload.ok
+      ? `Disney worker finished the ${job.type} job for ${job.disneyEmail || "the planner hub"}.`
+      : payload.lastAuthFailureReason || payload.lastRequiredActionMessage || "Disney worker finished with a failure state.",
+  };
 
   await writeBackendState(state);
 }

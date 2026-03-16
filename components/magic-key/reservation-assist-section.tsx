@@ -23,15 +23,17 @@ import type {
   ReservationHandoffOutcome,
   ReservationSessionStatus,
   SessionUser,
+  SyncMeta,
   WatchItem,
 } from "../../lib/magic-key/types";
-import { buildFeedLookup, formatWatchDate, resolveStatus } from "../../lib/magic-key/utils";
+import { buildFeedLookup, classNames, formatSyncTime, formatWatchDate, resolveStatus } from "../../lib/magic-key/utils";
 
 type ReservationAssistSectionProps = {
   reservationAssist: ReservationAssistState;
   plannerHubBooking: PlannerHubBookingState;
   plannerHubConnection: PlannerHubConnectionState;
   importedDisneyMembers: ImportedDisneyMember[];
+  syncMeta: SyncMeta;
   sessionUser: SessionUser | null;
   watchItems: WatchItem[];
   feedRows: FeedRow[];
@@ -155,6 +157,7 @@ export function ReservationAssistSection({
   plannerHubBooking,
   plannerHubConnection,
   importedDisneyMembers,
+  syncMeta,
   sessionUser,
   watchItems,
   feedRows,
@@ -176,6 +179,18 @@ export function ReservationAssistSection({
   const [isImporting, setIsImporting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (plannerHubConnection.status !== "pending_connect" && plannerHubConnection.status !== "importing") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void onRefreshState();
+    }, 15_000);
+
+    return () => window.clearInterval(timer);
+  }, [onRefreshState, plannerHubConnection.status]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -300,6 +315,41 @@ export function ReservationAssistSection({
   const showCheckpoint = reservationAssist.sessionStatus === "checking";
   const currentConnectionMeta = connectionTone[plannerHubConnection.status];
   const currentBookingMeta = bookingMeta[plannerHubBooking.status];
+  const backgroundCheckedAt = syncMeta.lastBackgroundRunAt;
+  const lastWorkerPollAt = syncMeta.lastWorkerPollAt;
+  const latestQueueAt = reservationAssist.lastVerifiedAt;
+  const workerHasCheckedInSinceQueue =
+    Boolean(lastWorkerPollAt && latestQueueAt) &&
+    new Date(lastWorkerPollAt).getTime() >= new Date(latestQueueAt).getTime();
+  const connectionSteps = [
+    {
+      label: "Request queued",
+      complete: plannerHubConnection.status !== "disconnected",
+      detail: latestQueueAt ? `Queued ${formatSyncTime(latestQueueAt)}` : "Queue a Disney connect request first.",
+    },
+    {
+      label: "Worker check-in",
+      complete: workerHasCheckedInSinceQueue,
+      detail: lastWorkerPollAt
+        ? `${formatSyncTime(lastWorkerPollAt)} • ${syncMeta.lastWorkerPollMessage || "Worker checked in."}`
+        : "No worker check-in recorded yet for this backend.",
+    },
+    {
+      label: "Encrypted session",
+      complete: plannerHubConnection.hasEncryptedSession,
+      detail: plannerHubConnection.hasEncryptedSession
+        ? "Disney session state was captured and stored encrypted."
+        : "Disney session has not been captured yet.",
+    },
+    {
+      label: "Members imported",
+      complete: plannerHubConnection.importedMemberCount > 0,
+      detail:
+        plannerHubConnection.importedMemberCount > 0
+          ? `${plannerHubConnection.importedMemberCount} connected Disney members imported.`
+          : "No connected Disney members imported yet.",
+    },
+  ];
 
   function stampVerification(patch: Partial<ReservationAssistState>) {
     onReservationAssistChange({
@@ -440,6 +490,35 @@ export function ReservationAssistSection({
             <p className="text-sm leading-6">{currentConnectionMeta.helper}</p>
           </div>
 
+          <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-semibold text-zinc-900">Worker pulse</div>
+              <div className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700">
+                {backgroundCheckedAt ? `Scheduler ${formatSyncTime(backgroundCheckedAt)}` : "Scheduler waiting"}
+              </div>
+            </div>
+            <div className="mt-3 space-y-3">
+              {connectionSteps.map((step) => (
+                <div key={step.label} className="flex items-start gap-3">
+                  <div
+                    className={classNames(
+                      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                      step.complete
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-zinc-200 bg-white text-zinc-400"
+                    )}
+                  >
+                    {step.complete ? <CheckCircle2 className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  </div>
+                  <div>
+                    <div className="font-medium text-zinc-900">{step.label}</div>
+                    <p className="mt-1 leading-6 text-zinc-600">{step.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {!sessionUser && (
             <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
               Sign in first to unlock the Disney connection flow and keep the planner hub, imported members, and booking targets tied to your account.
@@ -544,6 +623,11 @@ export function ReservationAssistSection({
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
                   <div className="font-semibold text-zinc-900">Action needed</div>
                   <p className="mt-2 leading-6">{plannerHubConnection.lastRequiredActionMessage}</p>
+                  {plannerHubConnection.status === "pending_connect" && !workerHasCheckedInSinceQueue && (
+                    <p className="mt-2 leading-6 text-zinc-500">
+                      If this stays queued after the next worker run, the GitHub worker may be checking a different backend than the site you are viewing.
+                    </p>
+                  )}
                 </div>
               )}
               {plannerHubConnection.lastAuthFailureReason && (

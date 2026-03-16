@@ -54,6 +54,10 @@ import { createDefaultPlannerHubConnection } from "../lib/magic-key/types";
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
   lastAttemptedSyncAt: "",
+  lastBackgroundRunAt: "",
+  lastBackgroundRunMessage: "",
+  lastWorkerPollAt: "",
+  lastWorkerPollMessage: "",
   mode: "snapshot-fallback",
   stale: false,
   message: "Ready to sync Disney data.",
@@ -1263,6 +1267,7 @@ export default function Home() {
             plannerHubBooking={plannerHubBooking}
             plannerHubConnection={plannerHubConnection}
             importedDisneyMembers={importedDisneyMembers}
+            syncMeta={syncMeta}
             sessionUser={sessionUser}
             watchItems={watchItems}
             feedRows={feedRows}

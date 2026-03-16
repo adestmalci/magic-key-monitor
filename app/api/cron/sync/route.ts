@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 
       recordActivityForUser(evaluation.state, userId, {
         source: "auto",
-        trigger: "Background 5-minute scheduler",
+        trigger: "Background scheduler (~5-minute cadence)",
         message: summary,
         details: changes.map(({ item, previousStatus, currentStatus }) => {
           const passName = PASS_TYPES.find((row) => row.id === item.passType)?.name ?? item.passType;
@@ -43,6 +43,12 @@ export async function GET(request: Request) {
         createdAt: syncMeta.lastSuccessfulSyncAt || new Date().toISOString(),
       });
     }
+
+    evaluation.state.syncMeta = {
+      ...evaluation.state.syncMeta,
+      lastBackgroundRunAt: new Date().toISOString(),
+      lastBackgroundRunMessage: `Background scheduler finished. ${syncMeta.message}`,
+    };
 
     await writeBackendState(evaluation.state);
     await sendAlertsForChanges(evaluation.state, evaluation.changesByUser);
@@ -55,6 +61,19 @@ export async function GET(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown cron sync failure.";
     console.error("Cron sync failed:", error);
+
+    try {
+      const { readBackendState, writeBackendState } = await import("../../../../lib/magic-key/backend");
+      const state = await readBackendState();
+      state.syncMeta = {
+        ...state.syncMeta,
+        lastBackgroundRunAt: new Date().toISOString(),
+        lastBackgroundRunMessage: `Background scheduler failed: ${message}`,
+      };
+      await writeBackendState(state);
+    } catch (secondaryError) {
+      console.error("Could not record background scheduler failure:", secondaryError);
+    }
 
     return Response.json(
       {

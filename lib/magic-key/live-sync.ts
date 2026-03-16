@@ -235,11 +235,21 @@ export async function fetchLiveFeed(): Promise<FeedRow[]> {
   return sortRows(rows);
 }
 
-function makeMeta(mode: SyncMode, stale: boolean, lastError: string, lastSuccessfulSyncAt: string): SyncMeta {
+function makeMeta(
+  mode: SyncMode,
+  stale: boolean,
+  lastError: string,
+  lastSuccessfulSyncAt: string,
+  previousMeta?: Partial<SyncMeta>
+): SyncMeta {
   if (mode === "live-disney") {
     return {
       lastAttemptedSyncAt: new Date().toISOString(),
       lastSuccessfulSyncAt,
+      lastBackgroundRunAt: previousMeta?.lastBackgroundRunAt || "",
+      lastBackgroundRunMessage: previousMeta?.lastBackgroundRunMessage || "",
+      lastWorkerPollAt: previousMeta?.lastWorkerPollAt || "",
+      lastWorkerPollMessage: previousMeta?.lastWorkerPollMessage || "",
       mode,
       stale,
       message: "Fresh pixie dust just arrived from Disney.",
@@ -251,6 +261,10 @@ function makeMeta(mode: SyncMode, stale: boolean, lastError: string, lastSuccess
     return {
       lastAttemptedSyncAt: new Date().toISOString(),
       lastSuccessfulSyncAt,
+      lastBackgroundRunAt: previousMeta?.lastBackgroundRunAt || "",
+      lastBackgroundRunMessage: previousMeta?.lastBackgroundRunMessage || "",
+      lastWorkerPollAt: previousMeta?.lastWorkerPollAt || "",
+      lastWorkerPollMessage: previousMeta?.lastWorkerPollMessage || "",
       mode,
       stale,
       message: "Serving the latest saved castle snapshot while your wishboard stays ready.",
@@ -261,6 +275,10 @@ function makeMeta(mode: SyncMode, stale: boolean, lastError: string, lastSuccess
   return {
     lastAttemptedSyncAt: new Date().toISOString(),
     lastSuccessfulSyncAt,
+    lastBackgroundRunAt: previousMeta?.lastBackgroundRunAt || "",
+    lastBackgroundRunMessage: previousMeta?.lastBackgroundRunMessage || "",
+    lastWorkerPollAt: previousMeta?.lastWorkerPollAt || "",
+    lastWorkerPollMessage: previousMeta?.lastWorkerPollMessage || "",
     mode,
     stale,
     message: "Disney's live feed took a brief nap, so we're showing the last good snapshot.",
@@ -283,7 +301,8 @@ export async function getFeedForRequest(options?: { forceRefresh?: boolean; maxA
       "cached",
       state.syncMeta.stale,
       state.syncMeta.lastError,
-      state.syncMeta.lastSuccessfulSyncAt
+      state.syncMeta.lastSuccessfulSyncAt,
+      state.syncMeta
     );
     await writeBackendState(state);
     return { rows: cachedRows, syncMeta: state.syncMeta };
@@ -300,6 +319,7 @@ export async function syncLiveFeed() {
     const rows = await fetchLiveFeed();
     await writeStoredFeed(rows);
     state.syncMeta = {
+      ...state.syncMeta,
       lastAttemptedSyncAt: attemptedAt,
       lastSuccessfulSyncAt: attemptedAt,
       mode: "live-disney",
@@ -312,6 +332,7 @@ export async function syncLiveFeed() {
   } catch (error) {
     const rows = await readStoredFeed();
     state.syncMeta = {
+      ...state.syncMeta,
       lastAttemptedSyncAt: attemptedAt,
       lastSuccessfulSyncAt: state.syncMeta.lastSuccessfulSyncAt,
       mode: "snapshot-fallback",

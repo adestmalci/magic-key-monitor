@@ -222,6 +222,10 @@ export function syncMetaFromHeaders(headers: Headers): SyncMeta {
   return {
     lastSuccessfulSyncAt: headers.get("X-Magic-Key-Last-Successful-Sync") || "",
     lastAttemptedSyncAt: headers.get("X-Magic-Key-Last-Attempted-Sync") || "",
+    lastBackgroundRunAt: "",
+    lastBackgroundRunMessage: "",
+    lastWorkerPollAt: "",
+    lastWorkerPollMessage: "",
     mode: mode === "live-disney" || mode === "snapshot-fallback" || mode === "cached" ? mode : "snapshot-fallback",
     stale: headers.get("X-Magic-Key-Stale") === "1",
     message: headers.get("X-Magic-Key-Status") || "Pixie dust is standing by for the next live sync.",
