@@ -17,6 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Trigger backend sync
         env:
           MAGIC_KEY_APP_URL: ${{ secrets.MAGIC_KEY_APP_URL }}
@@ -40,3 +52,9 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "User-Agent: github-actions-magic-key-monitor" \
             "${APP_URL}/api/cron/sync"
+
+      - name: Run Disney planner worker
+        env:
+          MAGIC_KEY_APP_URL: ${{ secrets.MAGIC_KEY_APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: node scripts/disney-planner-worker.mjs

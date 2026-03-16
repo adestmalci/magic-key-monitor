@@ -7,16 +7,22 @@ import { AlertsSection } from "../components/magic-key/alerts-section";
 import { CalendarSection } from "../components/magic-key/calendar-section";
 import { HeroSection } from "../components/magic-key/hero-section";
 import { MickeyRain } from "../components/magic-key/mickey-rain";
+import { ReservationAssistSection } from "../components/magic-key/reservation-assist-section";
 import { TabsNav } from "../components/magic-key/tabs-nav";
 import { WatchlistSection } from "../components/magic-key/watchlist-section";
 import { ENDPOINT_URL, FREQUENCIES, normalizeSupportedFrequency, PARK_OPTIONS, PASS_TYPES, POLL_MS, STATUS_META, STORAGE_KEY } from "../lib/magic-key/config";
 import type {
   ActivityItem,
+  BookingMode,
   DashboardUserState,
+  ImportedDisneyMember,
   FeedRow,
   FrequencyType,
   ParkOption,
   PassType,
+  PlannerHubConnectionState,
+  PlannerHubBookingState,
+  ReservationAssistState,
   SessionUser,
   StatusType,
   SyncMeta,
@@ -25,6 +31,7 @@ import type {
   ToastState,
   WatchItem,
 } from "../lib/magic-key/types";
+import { createDefaultPlannerHubBooking, createDefaultReservationAssist } from "../lib/magic-key/types";
 import {
   buildMonthCalendarRows,
   buildFeedLookup,
@@ -38,10 +45,11 @@ import {
   nextMonthKey,
   normalizeStatus,
   previousMonthKey,
-  resolveStatus,
+  resolveWatchItemStatus,
   syncMetaFromHeaders,
   urlBase64ToUint8Array,
 } from "../lib/magic-key/utils";
+import { createDefaultPlannerHubConnection } from "../lib/magic-key/types";
 
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
@@ -78,6 +86,10 @@ export default function Home() {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
+  const [reservationAssist, setReservationAssist] = useState<ReservationAssistState>(createDefaultReservationAssist());
+  const [plannerHubBooking, setPlannerHubBooking] = useState<PlannerHubBookingState>(createDefaultPlannerHubBooking());
+  const [plannerHubConnection, setPlannerHubConnection] = useState<PlannerHubConnectionState>(createDefaultPlannerHubConnection());
+  const [importedDisneyMembers, setImportedDisneyMembers] = useState<ImportedDisneyMember[]>([]);
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
@@ -169,6 +181,10 @@ export default function Home() {
     setSessionUser(data.user);
     setPushPublicKey(data.pushPublicKey || "");
     setSyncMeta(data.syncMeta || DEFAULT_SYNC_META);
+    setReservationAssist(data.reservationAssist || createDefaultReservationAssist(data.user?.email || ""));
+    setPlannerHubBooking(data.plannerHubBooking || createDefaultPlannerHubBooking());
+    setPlannerHubConnection(data.plannerHubConnection || createDefaultPlannerHubConnection(data.user?.email || ""));
+    setImportedDisneyMembers(Array.isArray(data.importedDisneyMembers) ? data.importedDisneyMembers : []);
 
     if (data.syncMeta?.lastSuccessfulSyncAt) {
       setLastSyncAt(data.syncMeta.lastSuccessfulSyncAt);
@@ -187,6 +203,13 @@ export default function Home() {
       setAccountSaveState("saved");
       setAccountSaveMessage(`Account settings are synced for ${data.user.email}.`);
     } else {
+      setReservationAssist((current) => ({
+        ...createDefaultReservationAssist(),
+        ...current,
+      }));
+      setPlannerHubBooking(createDefaultPlannerHubBooking());
+      setPlannerHubConnection(createDefaultPlannerHubConnection());
+      setImportedDisneyMembers([]);
       setAccountSaveState("local");
       setAccountSaveMessage("This wishboard is currently local to this browser.");
     }
@@ -245,6 +268,31 @@ export default function Home() {
       setAlertsEnabled(parsed.alertsEnabled ?? false);
       setEmailEnabled(parsed.emailEnabled ?? false);
       setEmailAddress(parsed.emailAddress ?? "");
+      setReservationAssist(
+        parsed.reservationAssist
+          ? {
+              ...createDefaultReservationAssist(parsed.reservationAssist?.plannerHubEmail ?? ""),
+              ...parsed.reservationAssist,
+            }
+          : createDefaultReservationAssist()
+      );
+      setPlannerHubBooking(
+        parsed.plannerHubBooking
+          ? {
+              ...createDefaultPlannerHubBooking(),
+              ...parsed.plannerHubBooking,
+            }
+          : createDefaultPlannerHubBooking()
+      );
+      setPlannerHubConnection(
+        parsed.plannerHubConnection
+          ? {
+              ...createDefaultPlannerHubConnection(parsed.plannerHubConnection?.disneyEmail ?? ""),
+              ...parsed.plannerHubConnection,
+            }
+          : createDefaultPlannerHubConnection()
+      );
+      setImportedDisneyMembers(Array.isArray(parsed.importedDisneyMembers) ? parsed.importedDisneyMembers : []);
       setFeedRows(parsed.feedRows ?? []);
       setActivity(pruneActivityItems(Array.isArray(parsed.activity) ? parsed.activity : []));
       setLastSyncAt(parsed.lastSyncAt ?? "");
@@ -258,6 +306,11 @@ export default function Home() {
             previousStatus: item.previousStatus ?? null,
             currentStatus: normalizeStatus(String(item.currentStatus)),
             lastCheckedAt: item.lastCheckedAt ?? item.changedAt ?? parsed.lastSyncAt ?? "",
+            plannerHubId: item.plannerHubId || "primary",
+            selectedImportedMemberIds: Array.isArray(item.selectedImportedMemberIds)
+              ? item.selectedImportedMemberIds.filter((value): value is string => typeof value === "string")
+              : [],
+            bookingMode: (item.bookingMode as BookingMode) === "watch_and_attempt" ? "watch_and_attempt" : "watch_only",
           }))
         : [];
 
@@ -284,6 +337,10 @@ export default function Home() {
         alertsEnabled,
         emailEnabled,
         emailAddress,
+        reservationAssist,
+        plannerHubBooking,
+        plannerHubConnection,
+        importedDisneyMembers,
         watchItems,
         feedRows,
         activity: activityToPersist,
@@ -301,6 +358,10 @@ export default function Home() {
     alertsEnabled,
     emailEnabled,
     emailAddress,
+    reservationAssist,
+    plannerHubBooking,
+    plannerHubConnection,
+    importedDisneyMembers,
     watchItems,
     feedRows,
     activity,
@@ -365,6 +426,10 @@ export default function Home() {
           alertsEnabled,
           pushEnabled,
           syncFrequency,
+          reservationAssist,
+          plannerHubBooking,
+          plannerHubConnection,
+          importedDisneyMembers,
         }),
       })
         .then(async (response) => {
@@ -388,7 +453,7 @@ export default function Home() {
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [hydrated, hasLoadedServerState, sessionUser, emailEnabled, emailAddress, alertsEnabled, pushEnabled, syncFrequency]);
+  }, [hydrated, hasLoadedServerState, sessionUser, emailEnabled, emailAddress, alertsEnabled, pushEnabled, syncFrequency, reservationAssist, plannerHubBooking, plannerHubConnection, importedDisneyMembers]);
 
   const syncFeed = useCallback(
     async (source: SyncSource = "manual", logActivity = true, trigger = "") => {
@@ -431,7 +496,7 @@ export default function Home() {
 
         setWatchItems((current) =>
           current.map((item) => {
-            const nextStatus = resolveStatus(item, lookup);
+            const nextStatus = resolveWatchItemStatus(item, lookup, importedDisneyMembers);
             const changed = nextStatus !== item.currentStatus;
 
             if (changed) {
@@ -534,7 +599,7 @@ export default function Home() {
         setIsSyncing(false);
       }
     },
-    [prependActivity, pushToast]
+    [importedDisneyMembers, prependActivity, pushToast]
   );
 
   useEffect(() => {
@@ -689,13 +754,15 @@ export default function Home() {
     }
 
     const lookup = buildFeedLookup(feedRows);
-    const nextStatus = resolveStatus(
+    const nextStatus = resolveWatchItemStatus(
       {
         date,
         passType,
         preferredPark,
+        selectedImportedMemberIds: [],
       },
-      lookup
+      lookup,
+      importedDisneyMembers
     );
 
     if (nextStatus === "blocked") {
@@ -711,6 +778,9 @@ export default function Home() {
       currentStatus: nextStatus,
       previousStatus: null,
       lastCheckedAt: lastSyncAt,
+      plannerHubId: "primary",
+      selectedImportedMemberIds: [],
+      bookingMode: "watch_only",
     };
 
     if (sessionUser) {
@@ -758,7 +828,7 @@ export default function Home() {
     }
 
     pushToast("success", sessionUser ? "Watched date saved to your account." : "Watched date added.");
-  }, [feedRows, lastSyncAt, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
+  }, [feedRows, importedDisneyMembers, lastSyncAt, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
 
   const addWatchItem = useCallback(async () => {
     await addWatchItemFromSelection({
@@ -814,6 +884,123 @@ export default function Home() {
     },
     [watchItems, prependActivity, pushToast, sessionUser]
   );
+
+  const updateWatchItemBooking = useCallback(
+    async (
+      id: string,
+      patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode">>
+    ) => {
+      const applyLocal = (item: WatchItem) => {
+        const nextItem = {
+          ...item,
+          plannerHubId: patch.plannerHubId ?? item.plannerHubId,
+          selectedImportedMemberIds: patch.selectedImportedMemberIds ?? item.selectedImportedMemberIds,
+          bookingMode: patch.bookingMode ?? item.bookingMode,
+        };
+
+        return {
+          ...nextItem,
+          currentStatus: resolveWatchItemStatus(nextItem, buildFeedLookup(feedRows), importedDisneyMembers),
+        };
+      };
+
+      if (sessionUser) {
+        const response = await fetch(`/api/watchlist/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          pushToast("error", data.error || "We couldn't update that booking target yet.");
+          setAccountSaveState("error");
+          setAccountSaveMessage("A booking-target change did not reach your account.");
+          return;
+        }
+
+        setWatchItems((current) => current.map((item) => (item.id === id ? data.item : item)));
+        setAccountSaveState("saved");
+        setAccountSaveMessage(`Wishboard changes are saved to ${sessionUser.email}.`);
+        return;
+      }
+
+      setWatchItems((current) => current.map((item) => (item.id === id ? applyLocal(item) : item)));
+    },
+    [feedRows, importedDisneyMembers, pushToast, sessionUser]
+  );
+
+  const connectDisneyPlannerHub = useCallback(
+    async (disneyEmail: string, password: string) => {
+      if (!sessionUser) {
+        pushToast("error", "Sign in first so the Disney planner hub can stay connected to your account.");
+        return false;
+      }
+
+      const response = await fetch("/api/disney/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disneyEmail, password }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        pushToast("error", data.error || "We couldn't queue the Disney connection.");
+        return false;
+      }
+
+      setAccountSaveState("saved");
+      setAccountSaveMessage(`Disney planner hub is queued for ${sessionUser.email}.`);
+      await loadDashboardState();
+      pushToast("success", "Disney connection queued. The worker will capture the session and import connected members.");
+      return true;
+    },
+    [loadDashboardState, pushToast, sessionUser]
+  );
+
+  const importConnectedDisneyMembers = useCallback(async () => {
+    if (!sessionUser) {
+      pushToast("error", "Sign in first so the Disney member import can stay tied to your account.");
+      return false;
+    }
+
+    const response = await fetch("/api/disney/import", {
+      method: "POST",
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      pushToast("error", data.error || "We couldn't queue the Disney member import.");
+      return false;
+    }
+
+    setAccountSaveState("saved");
+    setAccountSaveMessage(`Disney import is queued for ${sessionUser.email}.`);
+    await loadDashboardState();
+    pushToast("success", "Disney member import queued.");
+    return true;
+  }, [loadDashboardState, pushToast, sessionUser]);
+
+  const resetDisneyPlannerHub = useCallback(async () => {
+    if (!sessionUser) {
+      pushToast("error", "Sign in first so the Disney planner hub reset stays tied to your account.");
+      return false;
+    }
+
+    const response = await fetch("/api/disney/reset", {
+      method: "POST",
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      pushToast("error", data.error || "We couldn't reset the Disney planner hub yet.");
+      return false;
+    }
+
+    await loadDashboardState();
+    pushToast("success", "Disney planner hub reset.");
+    return true;
+  }, [loadDashboardState, pushToast, sessionUser]);
 
   const syncPushSubscription = useCallback(
     async (createIfMissing: boolean) => {
@@ -1001,6 +1188,7 @@ export default function Home() {
     { id: "watchlist", label: "Watchlist" },
     { id: "calendar", label: "Calendar" },
     { id: "activity", label: "Activity" },
+    { id: "reserve", label: "Reserve" },
     { id: "alerts", label: "Account" },
   ];
 
@@ -1068,6 +1256,41 @@ export default function Home() {
         )}
 
         {activeTab === "activity" && <ActivitySection activity={activity} />}
+
+        {activeTab === "reserve" && (
+          <ReservationAssistSection
+            reservationAssist={reservationAssist}
+            plannerHubBooking={plannerHubBooking}
+            plannerHubConnection={plannerHubConnection}
+            importedDisneyMembers={importedDisneyMembers}
+            sessionUser={sessionUser}
+            watchItems={watchItems}
+            feedRows={feedRows}
+            onReservationAssistChange={(patch) =>
+              setReservationAssist((current) => ({
+                ...current,
+                ...patch,
+              }))
+            }
+            onPlannerHubBookingChange={(patch) =>
+              setPlannerHubBooking((current) => ({
+                ...current,
+                ...patch,
+              }))
+            }
+            onPlannerHubConnectionChange={(patch) =>
+              setPlannerHubConnection((current) => ({
+                ...current,
+                ...patch,
+              }))
+            }
+            onWatchItemBookingChange={(id, patch) => void updateWatchItemBooking(id, patch)}
+            onConnectDisney={(disneyEmail, password) => connectDisneyPlannerHub(disneyEmail, password)}
+            onImportConnectedMembers={() => importConnectedDisneyMembers()}
+            onResetDisneyConnection={() => resetDisneyPlannerHub()}
+            onRefreshState={() => void loadDashboardState()}
+          />
+        )}
 
         {activeTab === "alerts" && (
           <AlertsSection

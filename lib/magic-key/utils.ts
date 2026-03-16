@@ -1,4 +1,4 @@
-import type { FeedRow, StatusType, SyncMeta, WatchItem } from "./types";
+import type { FeedRow, ImportedDisneyMember, StatusType, SyncMeta, WatchItem } from "./types";
 
 export type CalendarCell = {
   date: string;
@@ -170,6 +170,50 @@ export function resolveStatus(
   }
 
   return "unavailable";
+}
+
+function intersectStatuses(statuses: StatusType[]): StatusType {
+  if (statuses.length === 0) return "unavailable";
+  if (statuses.some((status) => status === "blocked")) return "blocked";
+  if (statuses.every((status) => status === "either")) return "either";
+
+  const allowsDl = statuses.every((status) => status === "either" || status === "dl");
+  const allowsDca = statuses.every((status) => status === "either" || status === "dca");
+
+  if (allowsDl && allowsDca) return "either";
+  if (allowsDl) return "dl";
+  if (allowsDca) return "dca";
+  return "unavailable";
+}
+
+export function resolveWatchItemStatus(
+  item: Pick<WatchItem, "date" | "passType" | "preferredPark" | "selectedImportedMemberIds">,
+  lookup: Map<string, StatusType>,
+  importedMembers: ImportedDisneyMember[]
+): StatusType {
+  const selectedMembers = item.selectedImportedMemberIds
+    .map((id) => importedMembers.find((member) => member.id === id))
+    .filter(
+      (member): member is ImportedDisneyMember =>
+        member !== undefined && member.automatable && Boolean(member.magicKeyPassType)
+    );
+
+  if (selectedMembers.length === 0) {
+    return resolveStatus(item, lookup);
+  }
+
+  return intersectStatuses(
+    selectedMembers.map((member) =>
+      resolveStatus(
+        {
+          date: item.date,
+          passType: member.magicKeyPassType as WatchItem["passType"],
+          preferredPark: item.preferredPark,
+        },
+        lookup
+      )
+    )
+  );
 }
 
 export function syncMetaFromHeaders(headers: Headers): SyncMeta {
