@@ -956,8 +956,13 @@ export default function Home() {
       setAccountSaveState("saved");
       setAccountSaveMessage(`Disney planner hub is queued for ${sessionUser.email}.`);
       await loadDashboardState();
-      pushToast("success", "Disney connection queued. The worker will capture the session and import connected members.");
-      return true;
+      pushToast(
+        "success",
+        data.jobId
+          ? `Disney connection queued. Job ${String(data.jobId).slice(0, 8)} is waiting for the worker.`
+          : "Disney connection queued. The worker will capture the session and import connected members."
+      );
+      return data.jobId || true;
     },
     [loadDashboardState, pushToast, sessionUser]
   );

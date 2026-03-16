@@ -30,6 +30,14 @@ async function api(path, init = {}) {
   return body;
 }
 
+function log(message, details) {
+  if (details) {
+    console.log(`[disney-worker] ${message}`, details);
+    return;
+  }
+  console.log(`[disney-worker] ${message}`);
+}
+
 async function clickFirst(page, selectors) {
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
@@ -274,12 +282,35 @@ async function handleImport(job, payload) {
 }
 
 async function run() {
+  log("starting", { appUrl: APP_URL, expectJob: process.env.WORKER_EXPECT_JOB === "1" });
   while (true) {
     const claimed = await api("/api/disney/worker/claim", { method: "POST" });
-    if (!claimed?.job) break;
+    log("claim response", {
+      appUrl: APP_URL,
+      claimedJobId: claimed?.job?.id || null,
+      claimedJobType: claimed?.job?.type || null,
+      diagnostics: claimed?.diagnostics || null,
+    });
+
+    if (!claimed?.job) {
+      if (process.env.WORKER_EXPECT_JOB === "1") {
+        throw new Error(
+          `Expected a planner-hub job on ${APP_URL}, but claim returned none. Diagnostics: ${JSON.stringify(
+            claimed?.diagnostics || {}
+          )}`
+        );
+      }
+      log("no pending job found");
+      break;
+    }
 
     let result;
     try {
+      log("processing job", {
+        jobId: claimed.job.id,
+        jobType: claimed.job.type,
+        disneyEmail: claimed.job.disneyEmail,
+      });
       result =
         claimed.job.type === "connect"
           ? await handleConnect(claimed.job, claimed.payload)
@@ -295,14 +326,30 @@ async function run() {
       };
     }
 
+    log("reporting job result", {
+      jobId: claimed.job.id,
+      jobType: claimed.job.type,
+      ok: result.ok,
+      status: result.status,
+    });
     await api("/api/disney/worker/report", {
       method: "POST",
       body: JSON.stringify({
         jobId: claimed.job.id,
+        reportedBy: `github-actions:${APP_URL}`,
         ...result,
       }),
+    });
+    log("report succeeded", {
+      jobId: claimed.job.id,
+      jobType: claimed.job.type,
+      ok: result.ok,
+      status: result.status,
     });
   }
 }
 
-await run();
+await run().catch((error) => {
+  console.error("[disney-worker] fatal", error);
+  process.exit(1);
+});

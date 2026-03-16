@@ -6,5 +6,15 @@ export async function POST(request: Request) {
   }
 
   const claimed = await claimNextPlannerHubJob();
-  return Response.json({ ok: true, job: claimed?.job ?? null, payload: claimed?.payload ?? null });
+  console.info("[disney-worker-claim]", {
+    jobId: claimed?.job?.id || null,
+    jobType: claimed?.job?.type || null,
+    diagnostics: claimed?.diagnostics || null,
+  });
+  return Response.json({
+    ok: true,
+    job: claimed?.job ?? null,
+    payload: claimed?.payload ?? null,
+    diagnostics: claimed?.diagnostics ?? null,
+  });
 }

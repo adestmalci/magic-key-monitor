@@ -80,6 +80,30 @@ type PlannerHubJobRecord = {
   lastError: string;
 };
 
+export type PlannerHubJobDiagnostics = {
+  appUrl: string;
+  pendingJobCount: number;
+  processingJobCount: number;
+  latestPendingJobId: string;
+  latestProcessingJobId: string;
+};
+
+type PlannerHubClaimResult = {
+  job: {
+    id: string;
+    type: DisneyWorkerJobType;
+    userId: string;
+    plannerHubId: string;
+    disneyEmail: string;
+  };
+  payload: {
+    disneyEmail: string;
+    password: string;
+    sessionState: unknown;
+  };
+  diagnostics: PlannerHubJobDiagnostics;
+} | null;
+
 type MagicLinkRecord = {
   id: string;
   userId: string;
@@ -256,6 +280,23 @@ function normalizePlannerHubConnection(
   }
 
   return next;
+}
+
+function currentAppUrlForDiagnostics() {
+  return (process.env.MAGIC_KEY_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+}
+
+function buildPlannerHubJobDiagnostics(state: BackendState): PlannerHubJobDiagnostics {
+  const pendingJobs = state.plannerHubJobs.filter((entry) => entry.status === "pending");
+  const processingJobs = state.plannerHubJobs.filter((entry) => entry.status === "processing");
+
+  return {
+    appUrl: currentAppUrlForDiagnostics(),
+    pendingJobCount: pendingJobs.length,
+    processingJobCount: processingJobs.length,
+    latestPendingJobId: pendingJobs[0]?.id || "",
+    latestProcessingJobId: processingJobs[0]?.id || "",
+  };
 }
 
 function normalizeImportedDisneyMembers(value: unknown): ImportedDisneyMember[] {
@@ -1370,6 +1411,7 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
       status: "pending_connect",
       lastJobId: job.id,
       lastJobType: "connect",
+      lastQueuedJobId: job.id,
       lastRequiredActionMessage: "Worker is connecting to Disney and capturing session state.",
       lastAuthFailureReason: "",
     },
@@ -1412,6 +1454,7 @@ export async function queuePlannerHubImportJob(userId: string) {
       status: "importing",
       lastJobId: job.id,
       lastJobType: "import",
+      lastQueuedJobId: job.id,
       lastRequiredActionMessage: "Worker is importing the current Disney connected members.",
       lastAuthFailureReason: "",
     },
@@ -1422,9 +1465,10 @@ export async function queuePlannerHubImportJob(userId: string) {
   return job;
 }
 
-export async function claimNextPlannerHubJob() {
+export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
   const state = await readBackendState();
   const pollAt = new Date().toISOString();
+  const diagnostics = buildPlannerHubJobDiagnostics(state);
   let job: PlannerHubJobRecord | undefined = state.plannerHubJobs.find((entry) => entry.status === "pending");
   if (!job) {
     state.syncMeta = {
@@ -1453,6 +1497,7 @@ export async function claimNextPlannerHubJob() {
           status: "paused_login",
           lastJobId: job.id,
           lastJobType: "connect",
+          lastQueuedJobId: job.id,
           lastAuthFailureReason: "Disney password handoff expired before connection could begin.",
           lastRequiredActionMessage: "Reconnect Disney so the worker can capture a fresh session.",
         },
@@ -1484,6 +1529,16 @@ export async function claimNextPlannerHubJob() {
   };
 
   const preferences = getPreferencesFromState(state, job.userId);
+  preferences.plannerHubConnection = normalizePlannerHubConnection(
+    {
+      ...preferences.plannerHubConnection,
+      lastClaimedJobId: job.id,
+      lastJobId: job.id,
+      lastJobType: job.type,
+      lastRequiredActionMessage: `Disney worker claimed the ${job.type} job and is now processing it.`,
+    },
+    preferences.plannerHubConnection.disneyEmail
+  );
   const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
   await writeBackendState(state);
 
@@ -1504,6 +1559,7 @@ export async function claimNextPlannerHubJob() {
       sessionState:
         secret?.encryptedSessionState ? JSON.parse(decryptSensitiveValue(secret.encryptedSessionState)) : null,
     },
+    diagnostics,
   };
 }
 
@@ -1518,6 +1574,7 @@ export async function completePlannerHubJob(
     lastAuthFailureReason?: string;
     lastRequiredActionMessage?: string;
     note?: string;
+    reportedBy?: string;
   }
 ) {
   const state = await readBackendState();
@@ -1558,6 +1615,9 @@ export async function completePlannerHubJob(
       lastRequiredActionMessage: payload.lastRequiredActionMessage ?? "",
       lastJobId: job.id,
       lastJobType: job.type,
+      lastReportedJobId: job.id,
+      lastWorkerResultAt: now,
+      lastWorkerResultSource: payload.reportedBy ?? "",
       hasEncryptedSession: Boolean(encryptedSessionState) || preferences.plannerHubConnection.hasEncryptedSession,
       importedMemberCount: importedMembers.length > 0 ? importedMembers.length : preferences.importedDisneyMembers.length,
     },
@@ -1602,6 +1662,15 @@ export async function completePlannerHubJob(
   };
 
   await writeBackendState(state);
+}
+
+export async function getPlannerHubDiagnosticsForUser(userId: string) {
+  const state = await readBackendState();
+  const preferences = getPreferencesFromState(state, userId);
+  return {
+    diagnostics: buildPlannerHubJobDiagnostics(state),
+    connection: preferences.plannerHubConnection,
+  };
 }
 
 export function isAuthorizedWorkerRequest(request: Request) {

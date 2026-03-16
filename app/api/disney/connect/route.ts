@@ -18,6 +18,12 @@ export async function POST(request: Request) {
 
   try {
     const job = await queuePlannerHubConnectJob(user.id, disneyEmail, password);
+    console.info("[disney-connect] queued", {
+      userId: user.id,
+      jobId: job.id,
+      plannerHubId: job.plannerHubId,
+      type: job.type,
+    });
     return Response.json({ ok: true, jobId: job.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "We couldn't queue the Disney connection yet.";

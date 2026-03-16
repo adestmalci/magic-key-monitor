@@ -120,6 +120,11 @@ export type PlannerHubConnectionState = {
   lastRequiredActionMessage: string;
   lastJobId: string;
   lastJobType: DisneyWorkerJobType | "";
+  lastQueuedJobId: string;
+  lastClaimedJobId: string;
+  lastReportedJobId: string;
+  lastWorkerResultAt: string;
+  lastWorkerResultSource: string;
   hasEncryptedSession: boolean;
   importedMemberCount: number;
 };
@@ -222,6 +227,11 @@ export function createDefaultPlannerHubConnection(disneyEmail = ""): PlannerHubC
     lastRequiredActionMessage: "",
     lastJobId: "",
     lastJobType: "",
+    lastQueuedJobId: "",
+    lastClaimedJobId: "",
+    lastReportedJobId: "",
+    lastWorkerResultAt: "",
+    lastWorkerResultSource: "",
     hasEncryptedSession: false,
     importedMemberCount: 0,
   };

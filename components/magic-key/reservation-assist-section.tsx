@@ -44,7 +44,7 @@ type ReservationAssistSectionProps = {
     id: string,
     patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode">>
   ) => void;
-  onConnectDisney: (disneyEmail: string, password: string) => Promise<boolean> | boolean;
+  onConnectDisney: (disneyEmail: string, password: string) => Promise<boolean | string> | boolean | string;
   onImportConnectedMembers: () => Promise<boolean> | boolean;
   onResetDisneyConnection: () => Promise<boolean> | boolean;
   onRefreshState: () => Promise<void> | void;
@@ -350,6 +350,19 @@ export function ReservationAssistSection({
           : "No connected Disney members imported yet.",
     },
   ];
+  const correlationRows = [
+    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || "None yet" },
+    { label: "Claimed job", value: plannerHubConnection.lastClaimedJobId || "No claim recorded yet" },
+    { label: "Reported job", value: plannerHubConnection.lastReportedJobId || "No report recorded yet" },
+    {
+      label: "Worker result",
+      value: plannerHubConnection.lastWorkerResultAt
+        ? `${formatSyncTime(plannerHubConnection.lastWorkerResultAt)}${
+            plannerHubConnection.lastWorkerResultSource ? ` • ${plannerHubConnection.lastWorkerResultSource}` : ""
+          }`
+        : "No worker result recorded yet",
+    },
+  ];
 
   function stampVerification(patch: Partial<ReservationAssistState>) {
     onReservationAssistChange({
@@ -413,6 +426,7 @@ export function ReservationAssistSection({
         onPlannerHubConnectionChange({
           disneyEmail: normalizedEmail,
           status: "pending_connect",
+          lastQueuedJobId: typeof queued === "string" ? queued : plannerHubConnection.lastQueuedJobId,
           lastRequiredActionMessage: "Waiting for the Disney worker to capture the planner session.",
           lastAuthFailureReason: "",
         });
@@ -514,6 +528,14 @@ export function ReservationAssistSection({
                     <div className="font-medium text-zinc-900">{step.label}</div>
                     <p className="mt-1 leading-6 text-zinc-600">{step.detail}</p>
                   </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              {correlationRows.map((row) => (
+                <div key={row.label} className="rounded-2xl border border-zinc-200 bg-white px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{row.label}</div>
+                  <div className="mt-1 break-all text-sm font-medium text-zinc-900">{row.value}</div>
                 </div>
               ))}
             </div>

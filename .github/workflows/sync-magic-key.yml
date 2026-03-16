@@ -57,4 +57,5 @@ jobs:
         env:
           MAGIC_KEY_APP_URL: ${{ secrets.MAGIC_KEY_APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          WORKER_EXPECT_JOB: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: node scripts/disney-planner-worker.mjs

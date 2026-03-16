@@ -6,6 +6,12 @@ export async function POST() {
 
   try {
     const job = await queuePlannerHubImportJob(user.id);
+    console.info("[disney-import] queued", {
+      userId: user.id,
+      jobId: job.id,
+      plannerHubId: job.plannerHubId,
+      type: job.type,
+    });
     return Response.json({ ok: true, jobId: job.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "We couldn't queue the Disney member import yet.";

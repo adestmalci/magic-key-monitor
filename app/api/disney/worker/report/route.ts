@@ -23,6 +23,13 @@ export async function POST(request: Request) {
       lastRequiredActionMessage:
         typeof body?.lastRequiredActionMessage === "string" ? body.lastRequiredActionMessage : "",
       note: typeof body?.note === "string" ? body.note : "",
+      reportedBy: typeof body?.reportedBy === "string" ? body.reportedBy : "",
+    });
+    console.info("[disney-worker-report]", {
+      jobId,
+      ok: Boolean(body?.ok),
+      status: body?.status,
+      reportedBy: typeof body?.reportedBy === "string" ? body.reportedBy : "",
     });
 
     return Response.json({ ok: true });
