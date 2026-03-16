@@ -191,7 +191,8 @@ export function resolveWatchItemStatus(
   lookup: Map<string, StatusType>,
   importedMembers: ImportedDisneyMember[]
 ): StatusType {
-  const selectedMembers = item.selectedImportedMemberIds
+  const selectedMemberIds = Array.isArray(item.selectedImportedMemberIds) ? item.selectedImportedMemberIds : [];
+  const selectedMembers = selectedMemberIds
     .map((id) => importedMembers.find((member) => member.id === id))
     .filter(
       (member): member is ImportedDisneyMember =>
