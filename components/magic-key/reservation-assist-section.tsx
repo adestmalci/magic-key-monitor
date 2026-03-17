@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { PASS_TYPES } from "../../lib/magic-key/config";
 import type {
+  DisneyWorkerJob,
   FeedRow,
   ImportedDisneyMember,
   PlannerHubConnectionState,
@@ -32,6 +33,7 @@ type ReservationAssistSectionProps = {
   reservationAssist: ReservationAssistState;
   plannerHubBooking: PlannerHubBookingState;
   plannerHubConnection: PlannerHubConnectionState;
+  latestDisneyJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
   syncMeta: SyncMeta;
   sessionUser: SessionUser | null;
@@ -48,6 +50,7 @@ type ReservationAssistSectionProps = {
   onImportConnectedMembers: () => Promise<boolean> | boolean;
   onResetDisneyConnection: () => Promise<boolean> | boolean;
   onRefreshState: () => Promise<void> | void;
+  onRefreshDisneyStatus: () => Promise<void> | void;
 };
 
 const DISNEY_SELECT_PARTY_URL = "https://disneyland.disney.go.com/entry-reservation/add/select-party/";
@@ -132,6 +135,59 @@ const bookingMeta: Record<PlannerHubBookingStatus, { label: string; tone: string
   failed: { label: "Failed", tone: "border-rose-200 bg-rose-50 text-rose-900" },
 };
 
+const livePhaseOrder = [
+  "queued",
+  "started",
+  "disney_open",
+  "email_step",
+  "password_step",
+  "select_party",
+  "members_imported",
+  "session_captured",
+  "completed",
+] as const;
+
+const phaseLabels: Record<(typeof livePhaseOrder)[number], string> = {
+  queued: "Request queued",
+  started: "Worker started",
+  disney_open: "Opening Disney",
+  email_step: "Email step",
+  password_step: "Password step",
+  select_party: "Select-party import",
+  members_imported: "Members imported",
+  session_captured: "Session captured",
+  completed: "Finished",
+};
+
+function deriveConnectionStatus(
+  plannerHubConnection: PlannerHubConnectionState,
+  latestDisneyJob: DisneyWorkerJob | null
+): PlannerHubConnectionState["status"] {
+  if (!latestDisneyJob) {
+    return plannerHubConnection.status;
+  }
+
+  if (latestDisneyJob.status === "processing") {
+    return latestDisneyJob.type === "import" ? "importing" : "pending_connect";
+  }
+
+  if (latestDisneyJob.status === "queued") {
+    return latestDisneyJob.type === "import" ? "importing" : "pending_connect";
+  }
+
+  if (latestDisneyJob.status === "failed") {
+    if (latestDisneyJob.phase === "paused_login") return "paused_login";
+    if (latestDisneyJob.phase === "paused_mismatch") return "paused_mismatch";
+    return "failed";
+  }
+
+  if (latestDisneyJob.status === "completed") {
+    return plannerHubConnection.hasEncryptedSession ? "connected" : plannerHubConnection.status;
+  }
+
+  return plannerHubConnection.status;
+}
+
 function summarizeEligibility(member: ImportedDisneyMember, item: WatchItem, lookup: Map<string, WatchItem["currentStatus"]>) {
   if (!member.automatable || !member.magicKeyPassType) {
     return { eligible: false, status: "unavailable" as const };
@@ -156,6 +212,7 @@ export function ReservationAssistSection({
   reservationAssist,
   plannerHubBooking,
   plannerHubConnection,
+  latestDisneyJob,
   importedDisneyMembers,
   syncMeta,
   sessionUser,
@@ -169,6 +226,7 @@ export function ReservationAssistSection({
   onImportConnectedMembers,
   onResetDisneyConnection,
   onRefreshState,
+  onRefreshDisneyStatus,
 }: ReservationAssistSectionProps) {
   const [disneyEmail, setDisneyEmail] = useState(
     plannerHubConnection.disneyEmail || reservationAssist.plannerHubEmail || sessionUser?.email || ""
@@ -186,11 +244,11 @@ export function ReservationAssistSection({
     }
 
     const timer = window.setInterval(() => {
-      void onRefreshState();
-    }, 15_000);
+      void onRefreshDisneyStatus();
+    }, 2_500);
 
     return () => window.clearInterval(timer);
-  }, [onRefreshState, plannerHubConnection.status]);
+  }, [onRefreshDisneyStatus, plannerHubConnection.status]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -313,34 +371,39 @@ export function ReservationAssistSection({
     reservationAssist.confirmProofCaptured,
   ].filter(Boolean).length;
   const showCheckpoint = reservationAssist.sessionStatus === "checking";
-  const currentConnectionMeta = connectionTone[plannerHubConnection.status];
+  const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestDisneyJob);
+  const currentConnectionMeta = connectionTone[effectiveConnectionStatus];
   const currentBookingMeta = bookingMeta[plannerHubBooking.status];
-  const backgroundCheckedAt = syncMeta.lastBackgroundRunAt;
-  const lastWorkerPollAt = syncMeta.lastWorkerPollAt;
-  const latestQueueAt = reservationAssist.lastVerifiedAt;
-  const hasClaimedJob = Boolean(plannerHubConnection.lastClaimedJobId);
-  const hasReportedJob = Boolean(plannerHubConnection.lastReportedJobId);
-  const workerHasCheckedInSinceQueue =
-    hasClaimedJob ||
-    hasReportedJob ||
-    (Boolean(lastWorkerPollAt && latestQueueAt) &&
-      new Date(lastWorkerPollAt).getTime() >= new Date(latestQueueAt).getTime());
+  const latestQueueAt = latestDisneyJob?.queuedAt || reservationAssist.lastVerifiedAt;
+  const activeDisneyJob =
+    effectiveConnectionStatus === "pending_connect" || effectiveConnectionStatus === "importing";
+  const connectionTimeline = livePhaseOrder.map((phase) => {
+    const event = latestDisneyJob?.events.find((entry) => entry.phase === phase);
+    return {
+      phase,
+      label: phaseLabels[phase],
+      at: event?.at || "",
+      message: event?.message || "",
+      complete: Boolean(event),
+    };
+  });
+  const failureEvent =
+    latestDisneyJob?.events.find((entry) => entry.phase === "paused_login") ||
+    latestDisneyJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
+    latestDisneyJob?.events.find((entry) => entry.phase === "failed") ||
+    null;
   const connectionSteps = [
     {
       label: "Request queued",
-      complete: plannerHubConnection.status !== "disconnected",
+      complete: Boolean(latestQueueAt),
       detail: latestQueueAt ? `Queued ${formatSyncTime(latestQueueAt)}` : "Queue a Disney connect request first.",
     },
     {
-      label: "Worker check-in",
-      complete: workerHasCheckedInSinceQueue,
-      detail: hasReportedJob
-        ? `Worker claimed and reported job ${plannerHubConnection.lastReportedJobId}.`
-        : hasClaimedJob
-          ? `Worker claimed job ${plannerHubConnection.lastClaimedJobId}.`
-          : lastWorkerPollAt
-            ? `${formatSyncTime(lastWorkerPollAt)} • ${syncMeta.lastWorkerPollMessage || "Worker checked in."}`
-        : "No worker check-in recorded yet for this backend.",
+      label: "Worker started",
+      complete: Boolean(latestDisneyJob?.startedAt),
+      detail: latestDisneyJob?.startedAt
+        ? `${formatSyncTime(latestDisneyJob.startedAt)} • ${latestDisneyJob.lastMessage || "Worker started the Disney job."}`
+        : "The dedicated Disney worker has not started this planner-hub job yet.",
     },
     {
       label: "Encrypted session",
@@ -358,14 +421,28 @@ export function ReservationAssistSection({
           : "No connected Disney members imported yet.",
     },
   ];
+  const latestFailureMessage =
+    latestDisneyJob?.lastError ||
+    latestDisneyJob?.lastMessage ||
+    plannerHubConnection.lastAuthFailureReason ||
+    plannerHubConnection.lastRequiredActionMessage ||
+    "";
+  const claimedJobValue =
+    plannerHubConnection.lastClaimedJobId ||
+    (latestDisneyJob?.startedAt ? latestDisneyJob.id : "") ||
+    "No claim recorded yet";
+  const reportedJobValue =
+    plannerHubConnection.lastReportedJobId ||
+    (latestDisneyJob?.finishedAt ? latestDisneyJob.id : "") ||
+    "No report recorded yet";
   const correlationRows = [
-    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || "None yet" },
-    { label: "Claimed job", value: plannerHubConnection.lastClaimedJobId || "No claim recorded yet" },
-    { label: "Reported job", value: plannerHubConnection.lastReportedJobId || "No report recorded yet" },
+    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || latestDisneyJob?.id || "None yet" },
+    { label: "Claimed job", value: claimedJobValue },
+    { label: "Reported job", value: reportedJobValue },
     {
       label: "Worker result",
-      value: plannerHubConnection.lastWorkerResultAt
-        ? `${formatSyncTime(plannerHubConnection.lastWorkerResultAt)}${
+      value: (plannerHubConnection.lastWorkerResultAt || plannerHubConnection.latestJobUpdatedAt)
+        ? `${formatSyncTime(plannerHubConnection.lastWorkerResultAt || plannerHubConnection.latestJobUpdatedAt)}${
             plannerHubConnection.lastWorkerResultSource ? ` • ${plannerHubConnection.lastWorkerResultSource}` : ""
           }`
         : "No worker result recorded yet",
@@ -464,7 +541,7 @@ export function ReservationAssistSection({
   async function handleRefresh() {
     setIsRefreshing(true);
     try {
-      await onRefreshState();
+      await onRefreshDisneyStatus();
     } finally {
       setIsRefreshing(false);
     }
@@ -510,13 +587,22 @@ export function ReservationAssistSection({
 
           <div className={`mt-4 rounded-[24px] border px-4 py-4 ${currentConnectionMeta.tone}`}>
             <p className="text-sm leading-6">{currentConnectionMeta.helper}</p>
+            <p className="mt-2 text-xs font-medium text-zinc-600">
+              {plannerHubConnection.latestJobUpdatedAt
+                ? `Last backend update ${formatSyncTime(plannerHubConnection.latestJobUpdatedAt)}`
+                : "Waiting for the next Disney worker update."}
+            </p>
           </div>
 
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
             <div className="flex items-center justify-between gap-3">
-              <div className="font-semibold text-zinc-900">Worker pulse</div>
+              <div className="font-semibold text-zinc-900">Disney connection timeline</div>
               <div className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700">
-                {backgroundCheckedAt ? `Scheduler ${formatSyncTime(backgroundCheckedAt)}` : "Scheduler waiting"}
+                {activeDisneyJob
+                  ? "Live polling"
+                  : plannerHubConnection.latestJobUpdatedAt
+                    ? `Updated ${formatSyncTime(plannerHubConnection.latestJobUpdatedAt)}`
+                    : "Idle"}
               </div>
             </div>
             <div className="mt-3 space-y-3">
@@ -538,6 +624,41 @@ export function ReservationAssistSection({
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Live progress</div>
+              <div className="mt-3 space-y-3">
+                {connectionTimeline.map((step) => (
+                  <div key={step.phase} className="flex items-start gap-3">
+                    <div
+                      className={classNames(
+                        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                        step.complete
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-zinc-200 bg-white text-zinc-400"
+                      )}
+                    >
+                      {step.complete ? <CheckCircle2 className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    </div>
+                    <div>
+                      <div className="font-medium text-zinc-900">{step.label}</div>
+                      <p className="mt-1 leading-6 text-zinc-600">
+                        {step.complete
+                          ? `${formatSyncTime(step.at)} • ${step.message}`
+                          : "Waiting for this step."}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {(failureEvent || latestFailureMessage) && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                    <div className="font-semibold">Failure / pause reason</div>
+                    <p className="mt-2 leading-6">
+                      {failureEvent?.message || latestFailureMessage || "The Disney worker failed closed."}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-4 grid gap-2 md:grid-cols-2">
               {correlationRows.map((row) => (
@@ -612,10 +733,11 @@ export function ReservationAssistSection({
               <RefreshCw className="h-4 w-4" />
               {isRefreshing ? "Refreshing..." : "Refresh status"}
             </button>
-            {(plannerHubConnection.status === "pending_connect" ||
-              plannerHubConnection.status === "failed" ||
-              plannerHubConnection.status === "paused_login" ||
-              plannerHubConnection.status === "paused_mismatch") && (
+            {(effectiveConnectionStatus === "pending_connect" ||
+              effectiveConnectionStatus === "importing" ||
+              effectiveConnectionStatus === "failed" ||
+              effectiveConnectionStatus === "paused_login" ||
+              effectiveConnectionStatus === "paused_mismatch") && (
               <button
                 type="button"
                 onClick={() => void handleReset()}
@@ -653,9 +775,9 @@ export function ReservationAssistSection({
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
                   <div className="font-semibold text-zinc-900">Action needed</div>
                   <p className="mt-2 leading-6">{plannerHubConnection.lastRequiredActionMessage}</p>
-                  {plannerHubConnection.status === "pending_connect" && !workerHasCheckedInSinceQueue && (
+                  {effectiveConnectionStatus === "pending_connect" && !latestDisneyJob?.startedAt && (
                     <p className="mt-2 leading-6 text-zinc-500">
-                      If this stays queued after the next worker run, the GitHub worker may be checking a different backend than the site you are viewing.
+                      The Disney worker service has not started this planner-hub job yet. If this stays queued, check the dedicated worker service rather than the background scheduler.
                     </p>
                   )}
                 </div>

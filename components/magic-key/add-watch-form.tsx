@@ -63,15 +63,22 @@ export function AddWatchForm({
   const backgroundCheckedAt = syncMeta.lastBackgroundRunAt;
   const backgroundLagMs = backgroundCheckedAt ? Date.now() - new Date(backgroundCheckedAt).getTime() : Number.POSITIVE_INFINITY;
   const backgroundHealthy = Number.isFinite(backgroundLagMs) && backgroundLagMs <= 1000 * 60 * 12;
+  const backgroundSeen = Boolean(backgroundCheckedAt);
   const modeLabel = syncMeta.stale ? "Showing last good snapshot" : "Live Disney mode";
   const headlineLabel = syncMeta.stale ? "Last checked" : "Last live sync";
   const detailLabel = syncMeta.stale
     ? `Checked ${formatSyncTime(checkedAt)}. Latest good live snapshot is ${formatSyncTime(lastSyncAt)}.`
     : "Latest Disney availability is loaded and ready for your watchlist.";
-  const backgroundLabel = backgroundCheckedAt ? formatSyncTime(backgroundCheckedAt) : "Waiting for first worker run";
+  const backgroundLabel = backgroundCheckedAt ? formatSyncTime(backgroundCheckedAt) : "Not seen yet";
   const backgroundNote = syncMeta.lastBackgroundRunMessage
     ? syncMeta.lastBackgroundRunMessage
     : "GitHub Actions aims for about every 5 minutes, but the exact minute can drift a bit.";
+  const backgroundStateLabel = backgroundSeen ? (backgroundHealthy ? "Healthy" : "Delayed") : "Not seen yet";
+  const backgroundStateTone = backgroundSeen
+    ? backgroundHealthy
+      ? "bg-emerald-100 text-emerald-800"
+      : "bg-amber-100 text-amber-800"
+    : "bg-zinc-100 text-zinc-700";
 
   function cellClasses(cell: Exclude<PickerCell, null>) {
     const base = "min-h-[58px] rounded-[20px] border px-2 py-2 text-left transition sm:min-h-[68px] sm:rounded-[22px] sm:px-2.5 sm:py-2.5";
@@ -261,19 +268,16 @@ export function AddWatchForm({
               <div className="mt-4 w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-left">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Background scheduler</div>
-                  <div
-                    className={classNames(
-                      "rounded-full px-2.5 py-1 text-[10px] font-semibold",
-                      backgroundHealthy
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-amber-100 text-amber-800"
-                    )}
-                  >
-                    {backgroundHealthy ? "~5 min cadence" : "Needs attention"}
+                  <div className={classNames("rounded-full px-2.5 py-1 text-[10px] font-semibold", backgroundStateTone)}>
+                    {backgroundStateLabel}
                   </div>
                 </div>
                 <div className="mt-2 text-sm font-semibold text-zinc-900">{backgroundLabel}</div>
-                <div className="mt-1 text-xs leading-5 text-zinc-600">{backgroundNote}</div>
+                <div className="mt-1 text-xs leading-5 text-zinc-600">
+                  {backgroundSeen
+                    ? `Last background sync ${formatSyncTime(backgroundCheckedAt)}. ${backgroundNote}`
+                    : `Background sync aims for about every 5 minutes. ${backgroundNote}`}
+                </div>
               </div>
             </div>
           </div>

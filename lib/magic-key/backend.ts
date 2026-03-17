@@ -16,6 +16,10 @@ import type {
   BookingMode,
   DashboardUserState,
   DisneyPlannerConnectionStatus,
+  DisneyWorkerEvent,
+  DisneyWorkerJob,
+  DisneyWorkerJobStatus,
+  DisneyWorkerPhase,
   DisneyWorkerJobType,
   FeedRow,
   FrequencyType,
@@ -71,13 +75,19 @@ type PlannerHubJobRecord = {
   userId: string;
   plannerHubId: string;
   type: DisneyWorkerJobType;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: DisneyWorkerJobStatus;
+  phase: DisneyWorkerPhase;
   disneyEmail: string;
-  createdAt: string;
+  queuedAt: string;
   claimedAt: string;
-  completedAt: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string;
   attempts: number;
+  reportedBy: string;
+  lastMessage: string;
   lastError: string;
+  events: DisneyWorkerEvent[];
 };
 
 export type PlannerHubJobDiagnostics = {
@@ -279,7 +289,118 @@ function normalizePlannerHubConnection(
     next.lastJobType = "";
   }
 
+  if (
+    next.latestJobStatus !== "" &&
+    next.latestJobStatus !== "queued" &&
+    next.latestJobStatus !== "processing" &&
+    next.latestJobStatus !== "completed" &&
+    next.latestJobStatus !== "failed"
+  ) {
+    next.latestJobStatus = "";
+  }
+
+  if (
+    next.latestPhase !== "" &&
+    next.latestPhase !== "queued" &&
+    next.latestPhase !== "started" &&
+    next.latestPhase !== "disney_open" &&
+    next.latestPhase !== "email_step" &&
+    next.latestPhase !== "password_step" &&
+    next.latestPhase !== "select_party" &&
+    next.latestPhase !== "members_imported" &&
+    next.latestPhase !== "session_captured" &&
+    next.latestPhase !== "completed" &&
+    next.latestPhase !== "failed" &&
+    next.latestPhase !== "paused_login" &&
+    next.latestPhase !== "paused_mismatch"
+  ) {
+    next.latestPhase = "";
+  }
+
   return next;
+}
+
+function normalizeDisneyWorkerEvents(value: unknown): DisneyWorkerEvent[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const next = item as Partial<DisneyWorkerEvent>;
+      const phase = next.phase;
+      return {
+        phase:
+          phase === "queued" ||
+          phase === "started" ||
+          phase === "disney_open" ||
+          phase === "email_step" ||
+          phase === "password_step" ||
+          phase === "select_party" ||
+          phase === "members_imported" ||
+          phase === "session_captured" ||
+          phase === "completed" ||
+          phase === "failed" ||
+          phase === "paused_login" ||
+          phase === "paused_mismatch"
+            ? phase
+            : "queued",
+        at: typeof next.at === "string" ? next.at : new Date().toISOString(),
+        message: typeof next.message === "string" ? next.message : "",
+      };
+    });
+}
+
+function normalizePlannerHubJobRecord(value: Partial<PlannerHubJobRecord> | null | undefined): PlannerHubJobRecord {
+  const queuedAt = typeof value?.queuedAt === "string" && value.queuedAt ? value.queuedAt : new Date().toISOString();
+  const status =
+    value?.status === "queued" ||
+    value?.status === "processing" ||
+    value?.status === "completed" ||
+    value?.status === "failed"
+      ? value.status
+      : "queued";
+  const phase =
+    value?.phase === "queued" ||
+    value?.phase === "started" ||
+    value?.phase === "disney_open" ||
+    value?.phase === "email_step" ||
+    value?.phase === "password_step" ||
+    value?.phase === "select_party" ||
+    value?.phase === "members_imported" ||
+    value?.phase === "session_captured" ||
+    value?.phase === "completed" ||
+    value?.phase === "failed" ||
+    value?.phase === "paused_login" ||
+    value?.phase === "paused_mismatch"
+      ? value.phase
+      : status === "failed"
+        ? "failed"
+        : status === "completed"
+          ? "completed"
+          : "queued";
+
+  return {
+    id: typeof value?.id === "string" ? value.id : randomUUID(),
+    userId: typeof value?.userId === "string" ? value.userId : "",
+    plannerHubId: typeof value?.plannerHubId === "string" && value.plannerHubId ? value.plannerHubId : "primary",
+    type:
+      value?.type === "connect" || value?.type === "import" || value?.type === "booking"
+        ? value.type
+        : "connect",
+    status,
+    phase,
+    disneyEmail: typeof value?.disneyEmail === "string" ? value.disneyEmail : "",
+    queuedAt,
+    claimedAt: typeof value?.claimedAt === "string" ? value.claimedAt : "",
+    startedAt: typeof value?.startedAt === "string" ? value.startedAt : "",
+    updatedAt: typeof value?.updatedAt === "string" && value.updatedAt ? value.updatedAt : queuedAt,
+    finishedAt: typeof value?.finishedAt === "string" ? value.finishedAt : "",
+    attempts: typeof value?.attempts === "number" ? value.attempts : 0,
+    reportedBy: typeof value?.reportedBy === "string" ? value.reportedBy : "",
+    lastMessage: typeof value?.lastMessage === "string" ? value.lastMessage : "",
+    lastError: typeof value?.lastError === "string" ? value.lastError : "",
+    events: normalizeDisneyWorkerEvents(value?.events),
+  };
 }
 
 function currentAppUrlForDiagnostics() {
@@ -287,7 +408,7 @@ function currentAppUrlForDiagnostics() {
 }
 
 function buildPlannerHubJobDiagnostics(state: BackendState): PlannerHubJobDiagnostics {
-  const pendingJobs = state.plannerHubJobs.filter((entry) => entry.status === "pending");
+  const pendingJobs = state.plannerHubJobs.filter((entry) => entry.status === "queued");
   const processingJobs = state.plannerHubJobs.filter((entry) => entry.status === "processing");
 
   return {
@@ -372,7 +493,7 @@ function normalizeSelectedImportedMemberIds(value: unknown): string[] {
 
 function defaultState(): BackendState {
   return {
-    version: 1,
+    version: 2,
     users: [],
     preferences: [],
     watchItems: [],
@@ -420,9 +541,9 @@ function pruneActivityItems(records: StoredActivityItem[], now = Date.now()) {
 
 function prunePlannerHubJobs(records: PlannerHubJobRecord[], now = Date.now()) {
   return records.filter((record) => {
-    const createdAt = Date.parse(record.createdAt);
-    if (!Number.isFinite(createdAt)) return false;
-    return now - createdAt <= JOB_RETENTION_MS;
+    const queuedAt = Date.parse(record.queuedAt);
+    if (!Number.isFinite(queuedAt)) return false;
+    return now - queuedAt <= JOB_RETENTION_MS;
   });
 }
 
@@ -555,7 +676,9 @@ export async function readBackendState(): Promise<BackendState> {
     magicLinks: pruneMagicLinks(Array.isArray(parsed.magicLinks) ? parsed.magicLinks : []),
     pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
     plannerHubSecrets: Array.isArray(parsed.plannerHubSecrets) ? parsed.plannerHubSecrets : [],
-    plannerHubJobs: prunePlannerHubJobs(Array.isArray(parsed.plannerHubJobs) ? parsed.plannerHubJobs : []),
+    plannerHubJobs: prunePlannerHubJobs(
+      Array.isArray(parsed.plannerHubJobs) ? parsed.plannerHubJobs.map((job) => normalizePlannerHubJobRecord(job)) : []
+    ),
   };
 }
 
@@ -772,6 +895,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       reservationAssist: createDefaultReservationAssist(),
       plannerHubBooking: createDefaultPlannerHubBooking(),
       plannerHubConnection: createDefaultPlannerHubConnection(),
+      latestDisneyJob: null,
       importedDisneyMembers: [],
       savedReservationParties: [],
       watchItems: [],
@@ -793,6 +917,11 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
   if (synchronizePlannerHubConnectionState(state, user.id, preferences)) {
     await writeBackendState(state);
   }
+  const latestDisneyJob = getLatestPlannerHubJobForUser(
+    state,
+    user.id,
+    preferences.plannerHubConnection.plannerHubId || "primary"
+  );
   return {
     user: { id: user.id, email: user.email },
     preferences: {
@@ -805,6 +934,24 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
     reservationAssist: preferences.reservationAssist,
     plannerHubBooking: preferences.plannerHubBooking,
     plannerHubConnection: preferences.plannerHubConnection,
+    latestDisneyJob: latestDisneyJob
+      ? {
+          id: latestDisneyJob.id,
+          plannerHubId: latestDisneyJob.plannerHubId,
+          type: latestDisneyJob.type,
+          status: latestDisneyJob.status,
+          phase: latestDisneyJob.phase,
+          queuedAt: latestDisneyJob.queuedAt,
+          startedAt: latestDisneyJob.startedAt,
+          updatedAt: latestDisneyJob.updatedAt,
+          finishedAt: latestDisneyJob.finishedAt,
+          lastMessage: latestDisneyJob.lastMessage,
+          lastError: latestDisneyJob.lastError,
+          reportedBy: latestDisneyJob.reportedBy,
+          attemptCount: latestDisneyJob.attempts,
+          events: latestDisneyJob.events,
+        }
+      : null,
     importedDisneyMembers: preferences.importedDisneyMembers,
     savedReservationParties: preferences.savedReservationParties,
     watchItems: getWatchItemsForUser(state, user.id).map((item) => ({
@@ -1315,9 +1462,24 @@ function findPlannerHubJob(state: BackendState, id: string) {
   return state.plannerHubJobs.find((job) => job.id === id) ?? null;
 }
 
+function getLatestPlannerHubJobForUser(state: BackendState, userId: string, plannerHubId = "primary") {
+  return (
+    state.plannerHubJobs
+      .filter((job) => job.userId === userId && job.plannerHubId === plannerHubId)
+      .sort((a, b) => Date.parse(b.updatedAt || b.queuedAt) - Date.parse(a.updatedAt || a.queuedAt))[0] ?? null
+  );
+}
+
+function appendJobEvent(job: PlannerHubJobRecord, phase: DisneyWorkerPhase, message: string, at = new Date().toISOString()) {
+  job.phase = phase;
+  job.updatedAt = at;
+  job.lastMessage = message;
+  job.events = [...normalizeDisneyWorkerEvents(job.events), { phase, at, message }];
+}
+
 function isPlannerHubJobStale(job: PlannerHubJobRecord | null) {
   if (!job) return true;
-  const reference = job.claimedAt || job.createdAt;
+  const reference = job.claimedAt || job.queuedAt;
   return Date.now() - Date.parse(reference) > PLANNER_HUB_JOB_STALE_MS;
 }
 
@@ -1338,8 +1500,14 @@ function synchronizePlannerHubConnectionState(
       {
         ...connection,
         status: "failed",
+        latestJobStatus: "failed",
+        latestPhase: job.phase || "failed",
+        latestPhaseMessage: job.lastMessage || job.lastError || "The last Disney worker attempt failed.",
+        latestPhaseAt: job.updatedAt || job.finishedAt || job.claimedAt || job.queuedAt,
+        latestJobUpdatedAt: job.updatedAt || job.finishedAt || job.claimedAt || job.queuedAt,
         lastAuthFailureReason: job.lastError || "The Disney worker could not finish the last planner-hub job.",
         lastRequiredActionMessage: "Reconnect Disney and try the planner-hub flow again.",
+        lastReportedJobId: job.id,
       },
       connection.disneyEmail
     );
@@ -1349,7 +1517,7 @@ function synchronizePlannerHubConnectionState(
   if (
     !job ||
     job.status === "completed" ||
-    ((job.status === "pending" || job.status === "processing") && isPlannerHubJobStale(job))
+    ((job.status === "queued" || job.status === "processing") && isPlannerHubJobStale(job))
   ) {
     upsertPlannerHubSecretRecord(state, userId, connection.plannerHubId || "primary", {
       encryptedPendingPassword: "",
@@ -1358,6 +1526,14 @@ function synchronizePlannerHubConnectionState(
       {
         ...connection,
         status: "failed",
+        latestJobStatus: job?.status || "failed",
+        latestPhase: job?.phase || "failed",
+        latestPhaseMessage:
+          job?.lastMessage ||
+          job?.lastError ||
+          `The Disney ${connection.status === "importing" ? "import" : "connection"} job is no longer active.`,
+        latestPhaseAt: job?.updatedAt || job?.finishedAt || job?.claimedAt || job?.queuedAt || "",
+        latestJobUpdatedAt: job?.updatedAt || job?.finishedAt || job?.claimedAt || job?.queuedAt || "",
         lastAuthFailureReason:
           job?.lastError ||
           `The Disney ${connection.status === "importing" ? "import" : "connection"} job is no longer active.`,
@@ -1389,7 +1565,7 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
         existingJob.userId === userId &&
         existingJob.plannerHubId === plannerHubId &&
         existingJob.type === "connect" &&
-        (existingJob.status === "pending" || existingJob.status === "processing")
+        (existingJob.status === "queued" || existingJob.status === "processing")
       )
   );
   const job: PlannerHubJobRecord = {
@@ -1397,13 +1573,19 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
     userId,
     plannerHubId,
     type: "connect",
-    status: "pending",
+    status: "queued",
+    phase: "queued",
     disneyEmail,
-    createdAt: now,
+    queuedAt: now,
     claimedAt: "",
-    completedAt: "",
+    startedAt: "",
+    updatedAt: now,
+    finishedAt: "",
     attempts: 0,
+    reportedBy: "",
+    lastMessage: "Disney connection queued and waiting for the worker.",
     lastError: "",
+    events: [{ phase: "queued", at: now, message: "Disney connection queued and waiting for the worker." }],
   };
 
   upsertPlannerHubSecretRecord(state, userId, plannerHubId, {
@@ -1426,6 +1608,11 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
       ...preferences.plannerHubConnection,
       disneyEmail,
       status: "pending_connect",
+      latestJobStatus: "queued",
+      latestPhase: "queued",
+      latestPhaseMessage: "Disney connection queued and waiting for the worker.",
+      latestPhaseAt: now,
+      latestJobUpdatedAt: now,
       lastJobId: job.id,
       lastJobType: "connect",
       lastQueuedJobId: job.id,
@@ -1455,13 +1642,19 @@ export async function queuePlannerHubImportJob(userId: string) {
     userId,
     plannerHubId,
     type: "import",
-    status: "pending",
+    status: "queued",
+    phase: "queued",
     disneyEmail: preferences.plannerHubConnection.disneyEmail || preferences.reservationAssist.plannerHubEmail,
-    createdAt: now,
+    queuedAt: now,
     claimedAt: "",
-    completedAt: "",
+    startedAt: "",
+    updatedAt: now,
+    finishedAt: "",
     attempts: 0,
+    reportedBy: "",
+    lastMessage: "Disney member import queued and waiting for the worker.",
     lastError: "",
+    events: [{ phase: "queued", at: now, message: "Disney member import queued and waiting for the worker." }],
   };
 
   state.plannerHubJobs.push(job);
@@ -1469,6 +1662,11 @@ export async function queuePlannerHubImportJob(userId: string) {
     {
       ...preferences.plannerHubConnection,
       status: "importing",
+      latestJobStatus: "queued",
+      latestPhase: "queued",
+      latestPhaseMessage: "Disney member import queued and waiting for the worker.",
+      latestPhaseAt: now,
+      latestJobUpdatedAt: now,
       lastJobId: job.id,
       lastJobType: "import",
       lastQueuedJobId: job.id,
@@ -1486,7 +1684,7 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
   const state = await readBackendState();
   const pollAt = new Date().toISOString();
   const diagnostics = buildPlannerHubJobDiagnostics(state);
-  let job: PlannerHubJobRecord | undefined = state.plannerHubJobs.find((entry) => entry.status === "pending");
+  let job: PlannerHubJobRecord | undefined = state.plannerHubJobs.find((entry) => entry.status === "queued");
   if (!job) {
     state.syncMeta = {
       ...state.syncMeta,
@@ -1501,8 +1699,15 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
     const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
     if (!isPendingPasswordFresh(secret)) {
       job.status = "failed";
-      job.completedAt = new Date().toISOString();
+      job.phase = "failed";
+      job.finishedAt = new Date().toISOString();
+      job.updatedAt = job.finishedAt;
+      job.lastMessage = "Disney password handoff expired before the worker claimed it.";
       job.lastError = "Disney password handoff expired before the worker claimed it.";
+      job.events = [
+        ...normalizeDisneyWorkerEvents(job.events),
+        { phase: "failed", at: job.finishedAt, message: job.lastMessage },
+      ];
 
       const preferences = getPreferencesFromState(state, job.userId);
       upsertPlannerHubSecretRecord(state, job.userId, job.plannerHubId, {
@@ -1512,16 +1717,22 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
         {
           ...preferences.plannerHubConnection,
           status: "paused_login",
+          latestJobStatus: "failed",
+          latestPhase: "paused_login",
+          latestPhaseMessage: "Disney password handoff expired before connection could begin.",
+          latestPhaseAt: job.finishedAt,
+          latestJobUpdatedAt: job.finishedAt,
           lastJobId: job.id,
           lastJobType: "connect",
           lastQueuedJobId: job.id,
+          lastReportedJobId: job.id,
           lastAuthFailureReason: "Disney password handoff expired before connection could begin.",
           lastRequiredActionMessage: "Reconnect Disney so the worker can capture a fresh session.",
         },
         preferences.plannerHubConnection.disneyEmail
       );
       await writeBackendState(state);
-      job = state.plannerHubJobs.find((entry) => entry.status === "pending");
+      job = state.plannerHubJobs.find((entry) => entry.status === "queued");
       if (!job) {
         state.syncMeta = {
           ...state.syncMeta,
@@ -1538,7 +1749,9 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
 
   job.status = "processing";
   job.claimedAt = new Date().toISOString();
+  job.startedAt = job.startedAt || job.claimedAt;
   job.attempts += 1;
+  appendJobEvent(job, "started", `Worker started the ${job.type} job for ${job.disneyEmail || "the planner hub"}.`, job.claimedAt);
   state.syncMeta = {
     ...state.syncMeta,
     lastWorkerPollAt: pollAt,
@@ -1549,6 +1762,12 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
   preferences.plannerHubConnection = normalizePlannerHubConnection(
     {
       ...preferences.plannerHubConnection,
+      status: job.type === "import" ? "importing" : "pending_connect",
+      latestJobStatus: "processing",
+      latestPhase: "started",
+      latestPhaseMessage: `Worker started the ${job.type} job for ${job.disneyEmail || "the planner hub"}.`,
+      latestPhaseAt: job.claimedAt,
+      latestJobUpdatedAt: job.claimedAt,
       lastClaimedJobId: job.id,
       lastJobId: job.id,
       lastJobType: job.type,
@@ -1578,6 +1797,73 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
     },
     diagnostics,
   };
+}
+
+export async function reportPlannerHubJobProgress(
+  jobId: string,
+  payload: {
+    phase: DisneyWorkerPhase;
+    message: string;
+    reportedBy?: string;
+  }
+) {
+  const state = await readBackendState();
+  const job = findPlannerHubJob(state, jobId);
+  if (!job) {
+    throw new Error("Planner hub job not found.");
+  }
+
+  const now = new Date().toISOString();
+  const preferences = getPreferencesFromState(state, job.userId);
+  appendJobEvent(job, payload.phase, payload.message, now);
+  job.status =
+    payload.phase === "completed" || payload.phase === "failed" || payload.phase === "paused_login" || payload.phase === "paused_mismatch"
+      ? job.status
+      : "processing";
+  job.reportedBy = payload.reportedBy || job.reportedBy;
+
+  const nextConnectionStatus: DisneyPlannerConnectionStatus =
+    payload.phase === "paused_login"
+      ? "paused_login"
+      : payload.phase === "paused_mismatch"
+        ? "paused_mismatch"
+        : payload.phase === "completed"
+          ? "connected"
+          : payload.phase === "failed"
+            ? "failed"
+            : job.type === "import"
+              ? "importing"
+              : "pending_connect";
+
+  preferences.plannerHubConnection = normalizePlannerHubConnection(
+    {
+      ...preferences.plannerHubConnection,
+      status: nextConnectionStatus,
+      latestJobStatus: job.status,
+      latestPhase: payload.phase,
+      latestPhaseMessage: payload.message,
+      latestPhaseAt: now,
+      latestJobUpdatedAt: now,
+      lastJobId: job.id,
+      lastJobType: job.type,
+      lastClaimedJobId: preferences.plannerHubConnection.lastClaimedJobId || job.id,
+      lastRequiredActionMessage:
+        payload.phase === "paused_login"
+          ? "Disney needs a fresh login or one-time code before the worker can continue."
+          : payload.phase === "paused_mismatch"
+            ? "Disney opened, but the expected planner flow or party no longer matched."
+            : preferences.plannerHubConnection.lastRequiredActionMessage,
+    },
+    preferences.plannerHubConnection.disneyEmail || job.disneyEmail
+  );
+
+  state.syncMeta = {
+    ...state.syncMeta,
+    lastWorkerPollAt: now,
+    lastWorkerPollMessage: payload.message,
+  };
+
+  await writeBackendState(state);
 }
 
 export async function completePlannerHubJob(
@@ -1627,6 +1913,22 @@ export async function completePlannerHubJob(
       ...preferences.plannerHubConnection,
       disneyEmail: job.disneyEmail || preferences.plannerHubConnection.disneyEmail,
       status: payload.status,
+      latestJobStatus: payload.ok ? "completed" : "failed",
+      latestPhase:
+        payload.status === "connected"
+          ? "completed"
+          : payload.status === "paused_login"
+            ? "paused_login"
+            : payload.status === "paused_mismatch"
+              ? "paused_mismatch"
+              : "failed",
+      latestPhaseMessage:
+        payload.note ||
+        payload.lastAuthFailureReason ||
+        payload.lastRequiredActionMessage ||
+        (payload.ok ? "Disney worker finished successfully." : "Disney worker failed closed."),
+      latestPhaseAt: now,
+      latestJobUpdatedAt: now,
       lastImportedAt: importedMembers.length > 0 ? now : preferences.plannerHubConnection.lastImportedAt,
       lastAuthFailureReason: payload.lastAuthFailureReason ?? "",
       lastRequiredActionMessage: payload.lastRequiredActionMessage ?? "",
@@ -1668,8 +1970,31 @@ export async function completePlannerHubJob(
   );
 
   job.status = payload.ok ? "completed" : "failed";
-  job.completedAt = now;
+  job.phase =
+    payload.status === "connected"
+      ? "completed"
+      : payload.status === "paused_login"
+        ? "paused_login"
+        : payload.status === "paused_mismatch"
+          ? "paused_mismatch"
+          : "failed";
+  job.finishedAt = now;
+  job.updatedAt = now;
+  job.reportedBy = payload.reportedBy || job.reportedBy;
+  job.lastMessage =
+    payload.note ||
+    payload.lastAuthFailureReason ||
+    payload.lastRequiredActionMessage ||
+    (payload.ok ? "Disney worker finished successfully." : "Disney worker failed closed.");
   job.lastError = payload.ok ? "" : payload.lastAuthFailureReason || payload.lastRequiredActionMessage || "Planner hub worker failed.";
+  job.events = [
+    ...normalizeDisneyWorkerEvents(job.events),
+    {
+      phase: job.phase,
+      at: now,
+      message: job.lastMessage,
+    },
+  ];
   state.syncMeta = {
     ...state.syncMeta,
     lastWorkerPollAt: now,
@@ -1687,6 +2012,47 @@ export async function getPlannerHubDiagnosticsForUser(userId: string) {
   return {
     diagnostics: buildPlannerHubJobDiagnostics(state),
     connection: preferences.plannerHubConnection,
+  };
+}
+
+export async function getDisneyStatusForUser(user: StoredUser | null) {
+  const state = await readBackendState();
+  const plannerHubConnection = user
+    ? getPreferencesFromState(state, user.id).plannerHubConnection
+    : createDefaultPlannerHubConnection();
+  const reservationAssist = user
+    ? getPreferencesFromState(state, user.id).reservationAssist
+    : createDefaultReservationAssist();
+  const importedDisneyMembers = user
+    ? getPreferencesFromState(state, user.id).importedDisneyMembers
+    : [];
+  const latestDisneyJob = user
+    ? getLatestPlannerHubJobForUser(state, user.id, plannerHubConnection.plannerHubId || "primary")
+    : null;
+
+  return {
+    plannerHubConnection,
+    reservationAssist,
+    importedDisneyMembers,
+    syncMeta: state.syncMeta,
+    latestDisneyJob: latestDisneyJob
+      ? {
+          id: latestDisneyJob.id,
+          plannerHubId: latestDisneyJob.plannerHubId,
+          type: latestDisneyJob.type,
+          status: latestDisneyJob.status,
+          phase: latestDisneyJob.phase,
+          queuedAt: latestDisneyJob.queuedAt,
+          startedAt: latestDisneyJob.startedAt,
+          updatedAt: latestDisneyJob.updatedAt,
+          finishedAt: latestDisneyJob.finishedAt,
+          lastMessage: latestDisneyJob.lastMessage,
+          lastError: latestDisneyJob.lastError,
+          reportedBy: latestDisneyJob.reportedBy,
+          attemptCount: latestDisneyJob.attempts,
+          events: latestDisneyJob.events,
+        }
+      : null,
   };
 }
 

@@ -29,6 +29,14 @@ export async function POST(request: Request) {
       jobId,
       ok: Boolean(body?.ok),
       status: body?.status,
+      reason:
+        typeof body?.lastAuthFailureReason === "string"
+          ? body.lastAuthFailureReason
+          : typeof body?.lastRequiredActionMessage === "string"
+            ? body.lastRequiredActionMessage
+            : typeof body?.note === "string"
+              ? body.note
+              : "",
       reportedBy: typeof body?.reportedBy === "string" ? body.reportedBy : "",
     });
 

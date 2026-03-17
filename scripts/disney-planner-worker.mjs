@@ -1,33 +1,14 @@
 import { chromium } from "playwright";
 
-const APP_URL = (process.env.MAGIC_KEY_APP_URL || "").replace(/\/$/, "");
-const CRON_SECRET = process.env.CRON_SECRET || "";
+const DEFAULT_APP_URL = (process.env.MAGIC_KEY_APP_URL || "").replace(/\/$/, "");
+const DEFAULT_CRON_SECRET = process.env.CRON_SECRET || "";
 const SELECT_PARTY_URL = "https://disneyland.disney.go.com/entry-reservation/add/select-party/";
 const PROFILE_URL = "https://disneyland.disney.go.com/profile/";
+const DISNEY_HOME_URL = "https://disneyland.disney.go.com/";
 
-if (!APP_URL) {
-  throw new Error("Missing MAGIC_KEY_APP_URL");
-}
-
-if (!CRON_SECRET) {
-  throw new Error("Missing CRON_SECRET");
-}
-
-async function api(path, init = {}) {
-  const response = await fetch(`${APP_URL}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${CRON_SECRET}`,
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
-  });
-
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error || `Worker API failed for ${path}`);
-  }
-  return body;
+function assertWorkerEnv(appUrl, cronSecret) {
+  if (!appUrl) throw new Error("Missing MAGIC_KEY_APP_URL");
+  if (!cronSecret) throw new Error("Missing CRON_SECRET");
 }
 
 function log(message, details) {
@@ -36,6 +17,60 @@ function log(message, details) {
     return;
   }
   console.log(`[disney-worker] ${message}`);
+}
+
+function createWorkerApi({ appUrl, cronSecret }) {
+  assertWorkerEnv(appUrl, cronSecret);
+
+  async function api(path, init = {}) {
+    const response = await fetch(`${appUrl}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${cronSecret}`,
+        "Content-Type": "application/json",
+        ...(init.headers || {}),
+      },
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error || `Worker API failed for ${path}`);
+    }
+    return body;
+  }
+
+  async function reportProgress(jobId, phase, message, reportedBy) {
+    log("reporting progress", { jobId, phase, message });
+    await api("/api/disney/worker/progress", {
+      method: "POST",
+      body: JSON.stringify({ jobId, phase, message, reportedBy }),
+    });
+  }
+
+  async function reportFinal(jobId, result, reportedBy) {
+    log("reporting job result", {
+      jobId,
+      ok: result.ok,
+      status: result.status,
+      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
+    });
+    await api("/api/disney/worker/report", {
+      method: "POST",
+      body: JSON.stringify({
+        jobId,
+        reportedBy,
+        ...result,
+      }),
+    });
+    log("report succeeded", {
+      jobId,
+      ok: result.ok,
+      status: result.status,
+      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
+    });
+  }
+
+  return { api, reportProgress, reportFinal };
 }
 
 async function clickFirst(page, selectors) {
@@ -68,13 +103,45 @@ async function fillFirst(page, selectors, value) {
   return false;
 }
 
-async function maybeLogin(page, email, password) {
-  await page.goto(PROFILE_URL, { waitUntil: "domcontentloaded", timeout: 120000 });
+async function gotoWithRetry(page, url, label) {
+  const waits = ["domcontentloaded", "load", "commit"];
+  let lastError = null;
+
+  for (let index = 0; index < waits.length; index += 1) {
+    try {
+      await page.goto(url, { waitUntil: waits[index], timeout: 120000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      log("navigation retry", {
+        label,
+        url,
+        waitUntil: waits[index],
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await page.waitForTimeout(1500 * (index + 1));
+      try {
+        await page.goto(DISNEY_HOME_URL, { waitUntil: "commit", timeout: 60000 });
+      } catch {
+        // Keep retrying the intended page even if the reset navigation fails.
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Could not open ${label}.`);
+}
+
+async function maybeLogin(page, email, password, progress) {
+  await progress("disney_open", "Opening Disney profile.");
+  await gotoWithRetry(page, PROFILE_URL, "Disney profile");
   await page.waitForTimeout(1500);
 
-  await fillFirst(page, ['input[type="email"]', 'input[name="email"]', 'input[placeholder*="Email" i]'], email);
-  await clickFirst(page, ["button:has-text('Continue')", "button:has-text('Next')"]);
-  await page.waitForTimeout(1500);
+  const filledEmail = await fillFirst(page, ['input[type="email"]', 'input[name="email"]', 'input[placeholder*="Email" i]'], email);
+  if (filledEmail) {
+    await progress("email_step", `Submitted planner email ${email}.`);
+    await clickFirst(page, ["button:has-text('Continue')", "button:has-text('Next')"]);
+    await page.waitForTimeout(1500);
+  }
 
   const sawOtpPrompt =
     (await page.locator("text=/one-time code/i").count().catch(() => 0)) > 0 ||
@@ -93,6 +160,7 @@ async function maybeLogin(page, email, password) {
     return { ok: false, status: "paused_login", reason: "Disney login could not be completed automatically." };
   }
 
+  await progress("password_step", "Submitted Disney password step.");
   await clickFirst(page, ["button:has-text('Log In')", "button:has-text('Continue')"]);
   await page.waitForTimeout(3000);
 
@@ -118,8 +186,9 @@ function parsePassType(text) {
   return "";
 }
 
-async function scrapeConnectedMembers(page) {
-  await page.goto(SELECT_PARTY_URL, { waitUntil: "domcontentloaded", timeout: 120000 });
+async function scrapeConnectedMembers(page, progress) {
+  await progress("select_party", "Opening Disney select-party to import connected members.");
+  await gotoWithRetry(page, SELECT_PARTY_URL, "Disney select-party");
   await page.waitForTimeout(3000);
 
   const url = page.url();
@@ -204,16 +273,24 @@ async function scrapeConnectedMembers(page) {
     };
   });
 
+  await progress("members_imported", `Imported ${importedDisneyMembers.length} connected Disney members.`);
   return { ok: true, importedDisneyMembers };
 }
 
-async function handleConnect(job, payload) {
-  const browser = await chromium.launch({ headless: true });
+async function createBrowser() {
+  return chromium.launch({
+    headless: true,
+    args: ["--disable-http2"],
+  });
+}
+
+async function handleConnect(job, payload, progress) {
+  const browser = await createBrowser();
   const context = await browser.newContext();
   const page = await context.newPage();
 
   try {
-    const login = await maybeLogin(page, payload.disneyEmail, payload.password);
+    const login = await maybeLogin(page, payload.disneyEmail, payload.password, progress);
     if (!login.ok) {
       return {
         ok: false,
@@ -224,7 +301,7 @@ async function handleConnect(job, payload) {
       };
     }
 
-    const imported = await scrapeConnectedMembers(page);
+    const imported = await scrapeConnectedMembers(page, progress);
     if (!imported.ok) {
       return {
         ok: false,
@@ -234,6 +311,8 @@ async function handleConnect(job, payload) {
         note: imported.reason,
       };
     }
+
+    await progress("session_captured", "Encrypted Disney browser session captured.");
 
     return {
       ok: true,
@@ -247,15 +326,15 @@ async function handleConnect(job, payload) {
   }
 }
 
-async function handleImport(job, payload) {
-  const browser = await chromium.launch({ headless: true });
+async function handleImport(job, payload, progress) {
+  const browser = await createBrowser();
   const context = await browser.newContext({
     storageState: payload.sessionState || undefined,
   });
   const page = await context.newPage();
 
   try {
-    const imported = await scrapeConnectedMembers(page);
+    const imported = await scrapeConnectedMembers(page, progress);
     if (!imported.ok) {
       return {
         ok: false,
@@ -269,6 +348,8 @@ async function handleImport(job, payload) {
       };
     }
 
+    await progress("session_captured", "Updated encrypted Disney browser session state.");
+
     return {
       ok: true,
       status: "connected",
@@ -281,13 +362,16 @@ async function handleImport(job, payload) {
   }
 }
 
-async function run() {
-  const expectJob = process.env.WORKER_EXPECT_JOB === "1";
-  log("starting", { appUrl: APP_URL, expectJob });
-  while (true) {
+export async function runWorker({ appUrl = DEFAULT_APP_URL, cronSecret = DEFAULT_CRON_SECRET, expectJob = false, loop = false } = {}) {
+  const { api, reportProgress, reportFinal } = createWorkerApi({ appUrl, cronSecret });
+  const reportedBy = `worker-service:${appUrl}`;
+
+  log("starting", { appUrl, expectJob, loop });
+
+  do {
     const claimed = await api("/api/disney/worker/claim", { method: "POST" });
     log("claim response", {
-      appUrl: APP_URL,
+      appUrl,
       claimedJobId: claimed?.job?.id || null,
       claimedJobType: claimed?.job?.type || null,
       diagnostics: claimed?.diagnostics || null,
@@ -296,12 +380,17 @@ async function run() {
     if (!claimed?.job) {
       if (expectJob) {
         throw new Error(
-          `Expected a planner-hub job on ${APP_URL}, but claim returned none. Diagnostics: ${JSON.stringify(
+          `Expected a planner-hub job on ${appUrl}, but claim returned none. Diagnostics: ${JSON.stringify(
             claimed?.diagnostics || {}
           )}`
         );
       }
-      log("no pending job found");
+
+      log("no pending job found", { appUrl });
+      if (loop) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        continue;
+      }
       break;
     }
 
@@ -312,10 +401,15 @@ async function run() {
         jobType: claimed.job.type,
         disneyEmail: claimed.job.disneyEmail,
       });
+
+      const progress = async (phase, message) => {
+        await reportProgress(claimed.job.id, phase, message, reportedBy);
+      };
+
       result =
         claimed.job.type === "connect"
-          ? await handleConnect(claimed.job, claimed.payload)
-          : await handleImport(claimed.job, claimed.payload);
+          ? await handleConnect(claimed.job, claimed.payload, progress)
+          : await handleImport(claimed.job, claimed.payload, progress);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Disney worker failed unexpectedly.";
       result = {
@@ -327,28 +421,7 @@ async function run() {
       };
     }
 
-    log("reporting job result", {
-      jobId: claimed.job.id,
-      jobType: claimed.job.type,
-      ok: result.ok,
-      status: result.status,
-      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
-    });
-    await api("/api/disney/worker/report", {
-      method: "POST",
-      body: JSON.stringify({
-        jobId: claimed.job.id,
-        reportedBy: `github-actions:${APP_URL}`,
-        ...result,
-      }),
-    });
-    log("report succeeded", {
-      jobId: claimed.job.id,
-      jobType: claimed.job.type,
-      ok: result.ok,
-      status: result.status,
-      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
-    });
+    await reportFinal(claimed.job.id, result, reportedBy);
 
     if (expectJob) {
       if (!result.ok) {
@@ -360,10 +433,19 @@ async function run() {
       }
       break;
     }
-  }
+
+    if (!loop) {
+      break;
+    }
+  } while (true);
 }
 
-await run().catch((error) => {
-  console.error("[disney-worker] fatal", error);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await runWorker({
+    expectJob: process.env.WORKER_EXPECT_JOB === "1",
+    loop: process.argv.includes("--loop") || process.env.WORKER_LOOP === "1",
+  }).catch((error) => {
+    console.error("[disney-worker] fatal", error);
+    process.exit(1);
+  });
+}

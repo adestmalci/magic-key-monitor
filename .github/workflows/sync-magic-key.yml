@@ -29,9 +29,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
       - name: Trigger backend sync
         env:
           MAGIC_KEY_APP_URL: ${{ secrets.MAGIC_KEY_APP_URL }}
@@ -55,10 +52,3 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "User-Agent: github-actions-magic-key-monitor" \
             "${APP_URL}/api/cron/sync"
-
-      - name: Run Disney planner worker
-        env:
-          MAGIC_KEY_APP_URL: ${{ secrets.MAGIC_KEY_APP_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          WORKER_EXPECT_JOB: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
-        run: node scripts/disney-planner-worker.mjs

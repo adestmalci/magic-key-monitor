@@ -30,6 +30,20 @@ export type DisneyPlannerConnectionStatus =
   | "paused_mismatch"
   | "failed";
 export type DisneyWorkerJobType = "connect" | "import" | "booking";
+export type DisneyWorkerJobStatus = "queued" | "processing" | "completed" | "failed";
+export type DisneyWorkerPhase =
+  | "queued"
+  | "started"
+  | "disney_open"
+  | "email_step"
+  | "password_step"
+  | "select_party"
+  | "members_imported"
+  | "session_captured"
+  | "completed"
+  | "failed"
+  | "paused_login"
+  | "paused_mismatch";
 export type DisneyEntitlementType = "magic_key" | "ticket_holder";
 
 export type FeedRow = {
@@ -115,6 +129,11 @@ export type PlannerHubConnectionState = {
   plannerHubId: string;
   disneyEmail: string;
   status: DisneyPlannerConnectionStatus;
+  latestJobStatus: DisneyWorkerJobStatus | "";
+  latestPhase: DisneyWorkerPhase | "";
+  latestPhaseMessage: string;
+  latestPhaseAt: string;
+  latestJobUpdatedAt: string;
   lastImportedAt: string;
   lastAuthFailureReason: string;
   lastRequiredActionMessage: string;
@@ -127,6 +146,29 @@ export type PlannerHubConnectionState = {
   lastWorkerResultSource: string;
   hasEncryptedSession: boolean;
   importedMemberCount: number;
+};
+
+export type DisneyWorkerEvent = {
+  phase: DisneyWorkerPhase;
+  at: string;
+  message: string;
+};
+
+export type DisneyWorkerJob = {
+  id: string;
+  plannerHubId: string;
+  type: DisneyWorkerJobType;
+  status: DisneyWorkerJobStatus;
+  phase: DisneyWorkerPhase;
+  queuedAt: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string;
+  lastMessage: string;
+  lastError: string;
+  reportedBy: string;
+  attemptCount: number;
+  events: DisneyWorkerEvent[];
 };
 
 export type ImportedDisneyMember = {
@@ -179,6 +221,7 @@ export type DashboardUserState = {
   reservationAssist: ReservationAssistState;
   plannerHubBooking: PlannerHubBookingState;
   plannerHubConnection: PlannerHubConnectionState;
+  latestDisneyJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
   savedReservationParties: SavedReservationParty[];
   watchItems: WatchItem[];
@@ -222,6 +265,11 @@ export function createDefaultPlannerHubConnection(disneyEmail = ""): PlannerHubC
     plannerHubId: "primary",
     disneyEmail,
     status: "disconnected",
+    latestJobStatus: "",
+    latestPhase: "",
+    latestPhaseMessage: "",
+    latestPhaseAt: "",
+    latestJobUpdatedAt: "",
     lastImportedAt: "",
     lastAuthFailureReason: "",
     lastRequiredActionMessage: "",
