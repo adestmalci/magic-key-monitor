@@ -1,14 +1,14 @@
 import { chromium } from "playwright";
 
 const DEFAULT_APP_URL = (process.env.MAGIC_KEY_APP_URL || "").replace(/\/$/, "");
-const DEFAULT_CRON_SECRET = process.env.CRON_SECRET || "";
+const DEFAULT_WORKER_SECRET = process.env.WORKER_SECRET || process.env.CRON_SECRET || "";
 const SELECT_PARTY_URL = "https://disneyland.disney.go.com/entry-reservation/add/select-party/";
 const PROFILE_URL = "https://disneyland.disney.go.com/profile/";
 const DISNEY_HOME_URL = "https://disneyland.disney.go.com/";
 
-function assertWorkerEnv(appUrl, cronSecret) {
+function assertWorkerEnv(appUrl, workerSecret) {
   if (!appUrl) throw new Error("Missing MAGIC_KEY_APP_URL");
-  if (!cronSecret) throw new Error("Missing CRON_SECRET");
+  if (!workerSecret) throw new Error("Missing WORKER_SECRET");
 }
 
 function log(message, details) {
@@ -19,14 +19,14 @@ function log(message, details) {
   console.log(`[disney-worker] ${message}`);
 }
 
-function createWorkerApi({ appUrl, cronSecret }) {
-  assertWorkerEnv(appUrl, cronSecret);
+function createWorkerApi({ appUrl, workerSecret }) {
+  assertWorkerEnv(appUrl, workerSecret);
 
   async function api(path, init = {}) {
     const response = await fetch(`${appUrl}${path}`, {
       ...init,
       headers: {
-        Authorization: `Bearer ${cronSecret}`,
+        Authorization: `Bearer ${workerSecret}`,
         "Content-Type": "application/json",
         ...(init.headers || {}),
       },
@@ -362,8 +362,8 @@ async function handleImport(job, payload, progress) {
   }
 }
 
-export async function runWorker({ appUrl = DEFAULT_APP_URL, cronSecret = DEFAULT_CRON_SECRET, expectJob = false, loop = false } = {}) {
-  const { api, reportProgress, reportFinal } = createWorkerApi({ appUrl, cronSecret });
+export async function runWorker({ appUrl = DEFAULT_APP_URL, workerSecret = DEFAULT_WORKER_SECRET, expectJob = false, loop = false } = {}) {
+  const { api, reportProgress, reportFinal } = createWorkerApi({ appUrl, workerSecret });
   const reportedBy = `worker-service:${appUrl}`;
 
   log("starting", { appUrl, expectJob, loop });

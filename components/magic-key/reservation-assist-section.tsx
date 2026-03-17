@@ -602,7 +602,7 @@ export function ReservationAssistSection({
                   ? "Live polling"
                   : plannerHubConnection.latestJobUpdatedAt
                     ? `Updated ${formatSyncTime(plannerHubConnection.latestJobUpdatedAt)}`
-                    : "Idle"}
+                    : "No active Disney job"}
               </div>
             </div>
             <div className="mt-3 space-y-3">

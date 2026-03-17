@@ -2057,13 +2057,15 @@ export async function getDisneyStatusForUser(user: StoredUser | null) {
 }
 
 export function isAuthorizedWorkerRequest(request: Request) {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) return true;
+  const workerSecret = process.env.WORKER_SECRET;
+  const legacyCronSecret = process.env.CRON_SECRET;
+  const acceptedSecrets = [workerSecret, legacyCronSecret].filter(Boolean) as string[];
+  if (!acceptedSecrets.length) return true;
 
   const authHeader = request.headers.get("authorization");
   const headerSecret = request.headers.get("x-cron-secret");
   const bearer = authHeader?.replace(/^Bearer\s+/i, "");
-  return bearer === expected || headerSecret === expected;
+  return acceptedSecrets.includes(bearer || "") || acceptedSecrets.includes(headerSecret || "");
 }
 
 export async function persistActivityForUser(

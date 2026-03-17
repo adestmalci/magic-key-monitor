@@ -13,6 +13,40 @@ Add these GitHub repository secrets before enabling the workflow:
 
 The workflow file lives at [`.github/workflows/sync-magic-key.yml`](./.github/workflows/sync-magic-key.yml).
 
+## Disney Worker Setup (Railway)
+
+Disney connect/import is intended to run on a dedicated Railway worker service, not on GitHub Actions.
+
+The repo includes:
+
+- [`Dockerfile`](./Dockerfile)
+  - Builds the worker image with Playwright + Chromium
+- [`railway.toml`](./railway.toml)
+  - Tells Railway to use the Docker build
+- `npm run worker:disney`
+  - Starts the long-lived Disney worker loop
+
+Add these environment variables to the Railway worker service:
+
+- `MAGIC_KEY_APP_URL`
+  - Your deployed Vercel app URL, for example `https://magic-key-monitor.vercel.app`
+- `WORKER_SECRET`
+  - Shared secret used only by the Disney worker endpoints
+- `NODE_ENV=production`
+
+Add the matching `WORKER_SECRET` to Vercel as well so these endpoints can authenticate the Railway worker:
+
+- `/api/disney/worker/claim`
+- `/api/disney/worker/progress`
+- `/api/disney/worker/report`
+
+During migration, worker endpoints still accept `CRON_SECRET` as a fallback, but the intended long-term split is:
+
+- `CRON_SECRET`
+  - GitHub Actions -> `/api/cron/sync`
+- `WORKER_SECRET`
+  - Railway Disney worker -> `/api/disney/worker/*`
+
 ## Hosted Storage Setup
 
 For local development, the app falls back to the JSON files in `data/`.

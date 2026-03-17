@@ -1,4 +1,20 @@
 import { isAuthorizedWorkerRequest, reportPlannerHubJobProgress } from "../../../../../lib/magic-key/backend";
+import type { DisneyWorkerPhase } from "../../../../../lib/magic-key/types";
+
+const allowedPhases = new Set<DisneyWorkerPhase>([
+  "queued",
+  "started",
+  "disney_open",
+  "email_step",
+  "password_step",
+  "select_party",
+  "members_imported",
+  "session_captured",
+  "completed",
+  "failed",
+  "paused_login",
+  "paused_mismatch",
+]);
 
 export async function POST(request: Request) {
   if (!isAuthorizedWorkerRequest(request)) {
@@ -19,9 +35,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Missing Disney worker phase update." }, { status: 400 });
   }
 
+  if (!allowedPhases.has(phase as DisneyWorkerPhase)) {
+    return Response.json({ error: "Invalid Disney worker phase." }, { status: 400 });
+  }
+
   try {
     await reportPlannerHubJobProgress(jobId, {
-      phase: phase as never,
+      phase: phase as DisneyWorkerPhase,
       message,
       reportedBy,
     });
