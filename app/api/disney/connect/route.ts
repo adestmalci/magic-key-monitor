@@ -12,10 +12,6 @@ export async function POST(request: Request) {
     return Response.json({ error: "Add the Disney planner email first." }, { status: 400 });
   }
 
-  if (!password) {
-    return Response.json({ error: "Add the Disney password so the worker can capture the session." }, { status: 400 });
-  }
-
   try {
     const job = await queuePlannerHubConnectJob(user.id, disneyEmail, password);
     console.info("[disney-connect] queued", {

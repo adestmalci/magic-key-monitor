@@ -17,6 +17,7 @@ import type {
   DashboardUserState,
   DisneyWorkerJob,
   ImportedDisneyMember,
+  LocalWorkerDevice,
   FeedRow,
   FrequencyType,
   ParkOption,
@@ -96,6 +97,7 @@ export default function Home() {
   const [plannerHubConnection, setPlannerHubConnection] = useState<PlannerHubConnectionState>(createDefaultPlannerHubConnection());
   const [latestDisneyJob, setLatestDisneyJob] = useState<DisneyWorkerJob | null>(null);
   const [importedDisneyMembers, setImportedDisneyMembers] = useState<ImportedDisneyMember[]>([]);
+  const [localWorkerDevices, setLocalWorkerDevices] = useState<LocalWorkerDevice[]>([]);
   const [authEmail, setAuthEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
@@ -192,6 +194,7 @@ export default function Home() {
     setPlannerHubConnection(data.plannerHubConnection || createDefaultPlannerHubConnection(data.user?.email || ""));
     setLatestDisneyJob(data.latestDisneyJob || null);
     setImportedDisneyMembers(Array.isArray(data.importedDisneyMembers) ? data.importedDisneyMembers : []);
+    setLocalWorkerDevices(Array.isArray(data.localWorkerDevices) ? data.localWorkerDevices : []);
 
     if (data.syncMeta?.lastSuccessfulSyncAt) {
       setLastSyncAt(data.syncMeta.lastSuccessfulSyncAt);
@@ -218,6 +221,7 @@ export default function Home() {
       setPlannerHubConnection(createDefaultPlannerHubConnection());
       setLatestDisneyJob(null);
       setImportedDisneyMembers([]);
+      setLocalWorkerDevices([]);
       setAccountSaveState("local");
       setAccountSaveMessage("This wishboard is currently local to this browser.");
     }
@@ -301,6 +305,7 @@ export default function Home() {
           : createDefaultPlannerHubConnection()
       );
       setImportedDisneyMembers(Array.isArray(parsed.importedDisneyMembers) ? parsed.importedDisneyMembers : []);
+      setLocalWorkerDevices(Array.isArray(parsed.localWorkerDevices) ? parsed.localWorkerDevices : []);
       setFeedRows(parsed.feedRows ?? []);
       setActivity(pruneActivityItems(Array.isArray(parsed.activity) ? parsed.activity : []));
       setLastSyncAt(parsed.lastSyncAt ?? "");
@@ -994,6 +999,40 @@ export default function Home() {
     return true;
   }, [loadDashboardState, pushToast, sessionUser]);
 
+  const createLocalWorkerPairingToken = useCallback(
+    async (deviceName: string) => {
+      if (!sessionUser) {
+        pushToast("error", "Sign in first so the local Disney worker can pair to your account.");
+        return "";
+      }
+
+      const response = await fetch("/api/disney/device/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceName }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        pushToast("error", data.error || "We couldn't create the local worker pairing token yet.");
+        return "";
+      }
+
+      pushToast("success", "Local worker pairing token created.");
+      return JSON.stringify(
+        {
+          appUrl: window.location.origin,
+          token: data.token,
+          deviceId: data.deviceId,
+          deviceName: data.deviceName,
+        },
+        null,
+        2
+      );
+    },
+    [pushToast, sessionUser]
+  );
+
   const loadDisneyWorkerStatus = useCallback(async () => {
     const response = await fetch("/api/disney/status", { cache: "no-store" });
     if (!response.ok) return;
@@ -1013,6 +1052,9 @@ export default function Home() {
     }
     if (Array.isArray(data.importedDisneyMembers)) {
       setImportedDisneyMembers(data.importedDisneyMembers);
+    }
+    if (Array.isArray(data.localWorkerDevices)) {
+      setLocalWorkerDevices(data.localWorkerDevices);
     }
     setLatestDisneyJob(data.latestDisneyJob || null);
   }, []);
@@ -1300,6 +1342,7 @@ export default function Home() {
             plannerHubConnection={plannerHubConnection}
             latestDisneyJob={latestDisneyJob}
             importedDisneyMembers={importedDisneyMembers}
+            localWorkerDevices={localWorkerDevices}
             syncMeta={syncMeta}
             sessionUser={sessionUser}
             watchItems={watchItems}
@@ -1324,6 +1367,7 @@ export default function Home() {
             }
             onWatchItemBookingChange={(id, patch) => void updateWatchItemBooking(id, patch)}
             onConnectDisney={(disneyEmail, password) => connectDisneyPlannerHub(disneyEmail, password)}
+            onCreateLocalWorkerPairToken={(deviceName) => createLocalWorkerPairingToken(deviceName)}
             onImportConnectedMembers={() => importConnectedDisneyMembers()}
             onResetDisneyConnection={() => resetDisneyPlannerHub()}
             onRefreshState={() => void loadDashboardState()}

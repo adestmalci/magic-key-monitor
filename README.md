@@ -13,39 +13,66 @@ Add these GitHub repository secrets before enabling the workflow:
 
 The workflow file lives at [`.github/workflows/sync-magic-key.yml`](./.github/workflows/sync-magic-key.yml).
 
-## Disney Worker Setup (Railway)
+## Disney Worker Setup (Local macOS)
 
-Disney connect/import is intended to run on a dedicated Railway worker service, not on GitHub Actions.
+Disney connect/import now targets a local macOS worker instead of GitHub Actions.
 
-The repo includes:
+The local flow is:
 
-- [`Dockerfile`](./Dockerfile)
-  - Builds the worker image with Playwright + Chromium
-- [`railway.toml`](./railway.toml)
-  - Tells Railway to use the Docker build
-- `npm run worker:disney`
-  - Starts the long-lived Disney worker loop
+1. Pair a Mac from the `Reserve` tab.
+2. Paste the pairing payload into the macOS tray app.
+3. Start the local worker on that Mac.
+4. Use `Open Disney local login` once per Mac when you need to establish the dedicated Disney session/profile.
+5. Queue Disney connect/import jobs from `Reserve`; the active Mac claims them automatically.
 
-Add these environment variables to the Railway worker service:
+### Local worker scripts
+
+- `npm run worker:disney:local`
+  - Starts the long-lived local Disney worker loop
+- `npm run worker:disney:login`
+  - Opens the dedicated local Playwright browser profile in a visible Disney login window
+
+### Local worker environment variables
+
+The local worker expects:
 
 - `MAGIC_KEY_APP_URL`
   - Your deployed Vercel app URL, for example `https://magic-key-monitor.vercel.app`
-- `WORKER_SECRET`
-  - Shared secret used only by the Disney worker endpoints
-- `NODE_ENV=production`
+- `MAGIC_KEY_LOCAL_WORKER_TOKEN`
+  - Pairing token created from the `Reserve` tab
+- `MAGIC_KEY_LOCAL_DEVICE_ID`
+  - Device id from the pairing payload
+- `MAGIC_KEY_LOCAL_DEVICE_NAME`
+  - Friendly name for that Mac, for example `Arya MacBook`
+- `MAGIC_KEY_LOCAL_PROFILE_DIR`
+  - Persistent Disney browser profile directory on that Mac
 
-Add the matching `WORKER_SECRET` to Vercel as well so these endpoints can authenticate the Railway worker:
+### macOS tray app starter
 
-- `/api/disney/worker/claim`
-- `/api/disney/worker/progress`
-- `/api/disney/worker/report`
+The repo includes a starter macOS menu bar app at:
 
-During migration, worker endpoints still accept `CRON_SECRET` as a fallback, but the intended long-term split is:
+- [`macos/MagicKeyDisneyWorkerTray`](./macos/MagicKeyDisneyWorkerTray)
 
-- `CRON_SECRET`
-  - GitHub Actions -> `/api/cron/sync`
-- `WORKER_SECRET`
-  - Railway Disney worker -> `/api/disney/worker/*`
+You can run it with:
+
+```bash
+cd macos/MagicKeyDisneyWorkerTray
+swift run
+```
+
+Paste the pairing payload from `Reserve`, then use:
+
+- `Start worker`
+- `Open Disney local login`
+
+to establish the local device flow.
+
+### Legacy cloud worker files
+
+The existing Railway/GitHub worker files remain in the repo for compatibility and future cloud work, but the intended v1 path is now:
+
+- local macOS Disney worker for connect/import
+- GitHub Actions only for background watchlist sync
 
 ## Hosted Storage Setup
 

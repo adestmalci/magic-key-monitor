@@ -17,6 +17,7 @@ import type {
   DisneyWorkerJob,
   FeedRow,
   ImportedDisneyMember,
+  LocalWorkerDevice,
   PlannerHubConnectionState,
   PlannerHubBookingState,
   PlannerHubBookingStatus,
@@ -35,6 +36,7 @@ type ReservationAssistSectionProps = {
   plannerHubConnection: PlannerHubConnectionState;
   latestDisneyJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
+  localWorkerDevices: LocalWorkerDevice[];
   syncMeta: SyncMeta;
   sessionUser: SessionUser | null;
   watchItems: WatchItem[];
@@ -47,6 +49,7 @@ type ReservationAssistSectionProps = {
     patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode">>
   ) => void;
   onConnectDisney: (disneyEmail: string, password: string) => Promise<boolean | string> | boolean | string;
+  onCreateLocalWorkerPairToken: (deviceName: string) => Promise<string> | string;
   onImportConnectedMembers: () => Promise<boolean> | boolean;
   onResetDisneyConnection: () => Promise<boolean> | boolean;
   onRefreshState: () => Promise<void> | void;
@@ -96,17 +99,17 @@ const connectionTone: Record<
   pending_connect: {
     label: "Connecting",
     tone: "border-sky-200 bg-sky-50 text-sky-900",
-    helper: "The worker is logging into Disney, capturing encrypted session state, and importing connected members.",
+    helper: "Your active local Mac is opening Disney, checking the dedicated local profile, and importing connected members.",
   },
   connected: {
     label: "Connected",
     tone: "border-emerald-200 bg-emerald-50 text-emerald-900",
-    helper: "The planner hub has encrypted Disney session state and imported members ready for targeting.",
+    helper: "The active local Mac has a working Disney session in its dedicated local profile and imported members ready for targeting.",
   },
   importing: {
     label: "Importing",
     tone: "border-sky-200 bg-sky-50 text-sky-900",
-    helper: "The worker is refreshing the connected party from Disney's select-party flow.",
+    helper: "The active local Mac is refreshing the connected party from Disney's select-party flow.",
   },
   paused_login: {
     label: "Paused for login",
@@ -182,7 +185,9 @@ function deriveConnectionStatus(
   }
 
   if (latestDisneyJob.status === "completed") {
-    return plannerHubConnection.hasEncryptedSession ? "connected" : plannerHubConnection.status;
+    return plannerHubConnection.hasEncryptedSession || plannerHubConnection.hasLocalSession
+      ? "connected"
+      : plannerHubConnection.status;
   }
 
   return plannerHubConnection.status;
@@ -214,6 +219,7 @@ export function ReservationAssistSection({
   plannerHubConnection,
   latestDisneyJob,
   importedDisneyMembers,
+  localWorkerDevices,
   syncMeta,
   sessionUser,
   watchItems,
@@ -223,6 +229,7 @@ export function ReservationAssistSection({
   onPlannerHubConnectionChange,
   onWatchItemBookingChange,
   onConnectDisney,
+  onCreateLocalWorkerPairToken,
   onImportConnectedMembers,
   onResetDisneyConnection,
   onRefreshState,
@@ -237,6 +244,9 @@ export function ReservationAssistSection({
   const [isImporting, setIsImporting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pairDeviceName, setPairDeviceName] = useState("My Mac");
+  const [pairToken, setPairToken] = useState("");
+  const [isCreatingPairToken, setIsCreatingPairToken] = useState(false);
 
   useEffect(() => {
     if (plannerHubConnection.status !== "pending_connect" && plannerHubConnection.status !== "importing") {
@@ -249,6 +259,11 @@ export function ReservationAssistSection({
 
     return () => window.clearInterval(timer);
   }, [onRefreshDisneyStatus, plannerHubConnection.status]);
+
+  const activeLocalDevice =
+    localWorkerDevices.find((device) => device.id === plannerHubConnection.activeDeviceId) ||
+    localWorkerDevices.find((device) => device.status === "active") ||
+    null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -529,6 +544,21 @@ export function ReservationAssistSection({
     }
   }
 
+  async function handleCreatePairToken() {
+    setIsCreatingPairToken(true);
+    try {
+      const next = await onCreateLocalWorkerPairToken(pairDeviceName.trim() || "My Mac");
+      if (typeof next === "string" && next) {
+        setPairToken(next);
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(next).catch(() => undefined);
+        }
+      }
+    } finally {
+      setIsCreatingPairToken(false);
+    }
+  }
+
   async function handleImport() {
     setIsImporting(true);
     try {
@@ -592,6 +622,27 @@ export function ReservationAssistSection({
                 ? `Last backend update ${formatSyncTime(plannerHubConnection.latestJobUpdatedAt)}`
                 : "Waiting for the next Disney worker update."}
             </p>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+              <div className="font-semibold text-zinc-900">Active local device</div>
+              <p className="mt-2 leading-6">
+                {activeLocalDevice
+                  ? `${activeLocalDevice.deviceName} • ${activeLocalDevice.platform} • last seen ${formatSyncTime(
+                      activeLocalDevice.lastSeenAt || activeLocalDevice.lastCheckInAt
+                    )}`
+                  : "No local Disney worker has checked in yet."}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+              <div className="font-semibold text-zinc-900">Local Disney profile</div>
+              <p className="mt-2 leading-6">
+                {plannerHubConnection.hasLocalSession
+                  ? "This account has a live Disney session on the active local device."
+                  : "No device-local Disney session has been confirmed yet."}
+              </p>
+            </div>
           </div>
 
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
@@ -676,6 +727,49 @@ export function ReservationAssistSection({
             </div>
           )}
 
+          {sessionUser && (
+            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-zinc-900">Pair a local Mac</div>
+                  <p className="mt-1 leading-6">
+                    Generate a pairing payload once, paste it into the local macOS worker app, and that Mac can start claiming Disney jobs for this account.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleCreatePairToken()}
+                  disabled={isCreatingPairToken}
+                  className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:border-violet-200 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  {isCreatingPairToken ? "Creating token..." : "Create local pair token"}
+                </button>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)]">
+                <label className="space-y-2">
+                  <span className="font-medium text-zinc-700">Device name</span>
+                  <input
+                    type="text"
+                    value={pairDeviceName}
+                    onChange={(event) => setPairDeviceName(event.target.value)}
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-violet-300"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="font-medium text-zinc-700">Pairing payload</span>
+                  <textarea
+                    value={pairToken}
+                    readOnly
+                    rows={4}
+                    placeholder="Generate this once, then paste it into the local macOS tray app."
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
           <div className="mt-4 grid gap-3">
             <label className="space-y-2 text-sm">
               <span className="font-medium text-zinc-700">Disney hub email</span>
@@ -699,7 +793,7 @@ export function ReservationAssistSection({
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 disabled={!sessionUser}
-                placeholder="Used once so the worker can capture encrypted session state"
+                placeholder="Optional: hand off a password once, or leave blank and use the local Disney session on your active Mac"
                 className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-violet-300 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
               />
             </label>
@@ -709,11 +803,11 @@ export function ReservationAssistSection({
             <button
               type="button"
               onClick={() => void handleConnectSubmit()}
-              disabled={!sessionUser || isConnecting || !disneyEmail.trim() || !password}
+              disabled={!sessionUser || isConnecting || !disneyEmail.trim()}
               className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <LogIn className="h-4 w-4" />
-              {isConnecting ? "Queueing Disney connect..." : "Connect Disney account"}
+              {isConnecting ? "Queueing Disney connect..." : "Connect Disney on active Mac"}
             </button>
             <button
               type="button"
@@ -754,9 +848,9 @@ export function ReservationAssistSection({
             <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
               <div className="font-semibold text-zinc-900">Encrypted session</div>
               <p className="mt-2 leading-6">
-                {plannerHubConnection.hasEncryptedSession
-                  ? "Worker session state is captured and stored encrypted."
-                  : "No encrypted Disney session has been captured yet."}
+                {plannerHubConnection.hasLocalSession || plannerHubConnection.hasEncryptedSession
+                  ? "A working Disney session has been confirmed for this planner hub."
+                  : "No Disney session has been confirmed yet for the active local device."}
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">

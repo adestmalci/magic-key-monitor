@@ -1,6 +1,15 @@
+import { homedir, hostname } from "node:os";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { chromium } from "playwright";
 
 const DEFAULT_APP_URL = (process.env.MAGIC_KEY_APP_URL || "").replace(/\/$/, "");
+const DEFAULT_LOCAL_WORKER_TOKEN = process.env.MAGIC_KEY_LOCAL_WORKER_TOKEN || "";
+const DEFAULT_LOCAL_DEVICE_ID = process.env.MAGIC_KEY_LOCAL_DEVICE_ID || "";
+const DEFAULT_LOCAL_DEVICE_NAME = process.env.MAGIC_KEY_LOCAL_DEVICE_NAME || hostname();
+const DEFAULT_LOCAL_PROFILE_DIR =
+  process.env.MAGIC_KEY_LOCAL_PROFILE_DIR ||
+  path.join(homedir(), "Library", "Application Support", "Magic Key Monitor", "disney-profile");
 const DEFAULT_WORKER_SECRET = process.env.WORKER_SECRET || process.env.CRON_SECRET || "";
 const SELECT_PARTY_URL = "https://disneyland.disney.go.com/entry-reservation/add/select-party/";
 const PROFILE_URL = "https://disneyland.disney.go.com/profile/";
@@ -9,6 +18,12 @@ const DISNEY_HOME_URL = "https://disneyland.disney.go.com/";
 function assertWorkerEnv(appUrl, workerSecret) {
   if (!appUrl) throw new Error("Missing MAGIC_KEY_APP_URL");
   if (!workerSecret) throw new Error("Missing WORKER_SECRET");
+}
+
+function assertLocalWorkerEnv(appUrl, localWorkerToken, deviceId) {
+  if (!appUrl) throw new Error("Missing MAGIC_KEY_APP_URL");
+  if (!localWorkerToken) throw new Error("Missing MAGIC_KEY_LOCAL_WORKER_TOKEN");
+  if (!deviceId) throw new Error("Missing MAGIC_KEY_LOCAL_DEVICE_ID");
 }
 
 function log(message, details) {
@@ -71,6 +86,110 @@ function createWorkerApi({ appUrl, workerSecret }) {
   }
 
   return { api, reportProgress, reportFinal };
+}
+
+function hasLocalSession(profileDir) {
+  try {
+    if (!existsSync(profileDir)) return false;
+    return readdirSync(profileDir).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function ensureLocalProfileDir(profileDir) {
+  mkdirSync(profileDir, { recursive: true });
+  return profileDir;
+}
+
+function createLocalWorkerApi({ appUrl, localWorkerToken, deviceId, deviceName, localProfilePath }) {
+  assertLocalWorkerEnv(appUrl, localWorkerToken, deviceId);
+
+  async function api(pathname, init = {}) {
+    const response = await fetch(`${appUrl}${pathname}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${localWorkerToken}`,
+        "Content-Type": "application/json",
+        ...(init.headers || {}),
+      },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error || `Local worker API failed for ${pathname}`);
+    }
+    return body;
+  }
+
+  async function checkIn() {
+    return api("/api/disney/local/check-in", {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId,
+        deviceName,
+        platform: "macos",
+        localProfilePath,
+        hasLocalSession: hasLocalSession(localProfilePath),
+      }),
+    });
+  }
+
+  async function claim() {
+    return api("/api/disney/local/claim", {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId,
+        deviceName,
+        platform: "macos",
+        localProfilePath,
+        hasLocalSession: hasLocalSession(localProfilePath),
+      }),
+    });
+  }
+
+  async function reportProgress(jobId, phase, message, reportedBy, sessionPresent) {
+    log("reporting progress", { jobId, phase, message, deviceId });
+    await api("/api/disney/local/progress", {
+      method: "POST",
+      body: JSON.stringify({
+        jobId,
+        phase,
+        message,
+        reportedBy,
+        deviceId,
+        hasLocalSession: sessionPresent,
+      }),
+    });
+  }
+
+  async function reportFinal(jobId, result, reportedBy) {
+    log("reporting job result", {
+      jobId,
+      ok: result.ok,
+      status: result.status,
+      deviceId,
+      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
+    });
+    await api("/api/disney/local/report", {
+      method: "POST",
+      body: JSON.stringify({
+        jobId,
+        reportedBy,
+        deviceId,
+        hasLocalSession: result.hasLocalSession,
+        ...result,
+      }),
+    });
+    log("report succeeded", {
+      jobId,
+      ok: result.ok,
+      status: result.status,
+      deviceId,
+      reason: result.lastAuthFailureReason || result.lastRequiredActionMessage || result.note || "",
+    });
+  }
+
+  return { checkIn, claim, reportProgress, reportFinal };
 }
 
 async function clickFirst(page, selectors) {
@@ -277,17 +396,17 @@ async function scrapeConnectedMembers(page, progress) {
   return { ok: true, importedDisneyMembers };
 }
 
-async function createBrowser() {
-  return chromium.launch({
-    headless: true,
+async function createLocalContext(profileDir, headless = true) {
+  ensureLocalProfileDir(profileDir);
+  return chromium.launchPersistentContext(profileDir, {
+    headless,
     args: ["--disable-http2"],
   });
 }
 
-async function handleConnect(job, payload, progress) {
-  const browser = await createBrowser();
-  const context = await browser.newContext();
-  const page = await context.newPage();
+async function handleConnect(job, payload, progress, profileDir) {
+  const context = await createLocalContext(profileDir, true);
+  const page = context.pages()[0] || (await context.newPage());
 
   try {
     const login = await maybeLogin(page, payload.disneyEmail, payload.password, progress);
@@ -295,6 +414,7 @@ async function handleConnect(job, payload, progress) {
       return {
         ok: false,
         status: login.status,
+        hasLocalSession: false,
         lastAuthFailureReason: login.reason,
         lastRequiredActionMessage: "Refresh the Disney planner hub manually and reconnect.",
         note: login.reason,
@@ -318,20 +438,17 @@ async function handleConnect(job, payload, progress) {
       ok: true,
       status: "connected",
       importedDisneyMembers: imported.importedDisneyMembers,
-      sessionState: await context.storageState(),
+      hasLocalSession: true,
       note: "Connected Disney planner hub and imported connected members from the live select-party flow.",
     };
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
-async function handleImport(job, payload, progress) {
-  const browser = await createBrowser();
-  const context = await browser.newContext({
-    storageState: payload.sessionState || undefined,
-  });
-  const page = await context.newPage();
+async function handleImport(job, payload, progress, profileDir) {
+  const context = await createLocalContext(profileDir, true);
+  const page = context.pages()[0] || (await context.newPage());
 
   try {
     const imported = await scrapeConnectedMembers(page, progress);
@@ -339,6 +456,7 @@ async function handleImport(job, payload, progress) {
       return {
         ok: false,
         status: imported.status,
+        hasLocalSession: imported.status !== "paused_login",
         lastAuthFailureReason: imported.reason,
         lastRequiredActionMessage:
           imported.status === "paused_login"
@@ -354,22 +472,41 @@ async function handleImport(job, payload, progress) {
       ok: true,
       status: "connected",
       importedDisneyMembers: imported.importedDisneyMembers,
-      sessionState: await context.storageState(),
+      hasLocalSession: true,
       note: "Imported connected Disney members from the live select-party flow.",
     };
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
-export async function runWorker({ appUrl = DEFAULT_APP_URL, workerSecret = DEFAULT_WORKER_SECRET, expectJob = false, loop = false } = {}) {
-  const { api, reportProgress, reportFinal } = createWorkerApi({ appUrl, workerSecret });
-  const reportedBy = `worker-service:${appUrl}`;
+export async function runWorker({
+  appUrl = DEFAULT_APP_URL,
+  workerSecret = DEFAULT_WORKER_SECRET,
+  localWorkerToken = DEFAULT_LOCAL_WORKER_TOKEN,
+  deviceId = DEFAULT_LOCAL_DEVICE_ID,
+  deviceName = DEFAULT_LOCAL_DEVICE_NAME,
+  localProfilePath = DEFAULT_LOCAL_PROFILE_DIR,
+  expectJob = false,
+  loop = false,
+} = {}) {
+  const localMode = Boolean(localWorkerToken && deviceId);
+  const legacyApi = localMode ? null : createWorkerApi({ appUrl, workerSecret });
+  const localApi = localMode
+    ? createLocalWorkerApi({ appUrl, localWorkerToken, deviceId, deviceName, localProfilePath })
+    : null;
+  const reportedBy = localMode ? `local-device:${deviceName}@${hostname()}` : `worker-service:${appUrl}`;
 
-  log("starting", { appUrl, expectJob, loop });
+  log("starting", { appUrl, expectJob, loop, localMode, deviceId: localMode ? deviceId : undefined, deviceName: localMode ? deviceName : undefined });
 
   do {
-    const claimed = await api("/api/disney/worker/claim", { method: "POST" });
+    if (localApi) {
+      await localApi.checkIn();
+    }
+
+    const claimed = localApi
+      ? await localApi.claim()
+      : await legacyApi.api("/api/disney/worker/claim", { method: "POST" });
     log("claim response", {
       appUrl,
       claimedJobId: claimed?.job?.id || null,
@@ -403,25 +540,30 @@ export async function runWorker({ appUrl = DEFAULT_APP_URL, workerSecret = DEFAU
       });
 
       const progress = async (phase, message) => {
-        await reportProgress(claimed.job.id, phase, message, reportedBy);
+        await (localApi
+          ? localApi.reportProgress(claimed.job.id, phase, message, reportedBy, hasLocalSession(localProfilePath))
+          : legacyApi.reportProgress(claimed.job.id, phase, message, reportedBy));
       };
 
       result =
         claimed.job.type === "connect"
-          ? await handleConnect(claimed.job, claimed.payload, progress)
-          : await handleImport(claimed.job, claimed.payload, progress);
+          ? await handleConnect(claimed.job, claimed.payload, progress, localProfilePath)
+          : await handleImport(claimed.job, claimed.payload, progress, localProfilePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Disney worker failed unexpectedly.";
       result = {
         ok: false,
         status: "failed",
+        hasLocalSession: hasLocalSession(localProfilePath),
         lastAuthFailureReason: message,
         lastRequiredActionMessage: message,
         note: message,
       };
     }
 
-    await reportFinal(claimed.job.id, result, reportedBy);
+    await (localApi
+      ? localApi.reportFinal(claimed.job.id, result, reportedBy)
+      : legacyApi.reportFinal(claimed.job.id, result, reportedBy));
 
     if (expectJob) {
       if (!result.ok) {

@@ -24,6 +24,8 @@ import type {
   FeedRow,
   FrequencyType,
   ImportedDisneyMember,
+  LocalWorkerDevice,
+  LocalWorkerDeviceStatus,
   PlannerHubConnectionState,
   PlannerHubBookingState,
   ReservationHandoffOutcome,
@@ -74,6 +76,7 @@ type PlannerHubJobRecord = {
   id: string;
   userId: string;
   plannerHubId: string;
+  assignedDeviceId: string;
   type: DisneyWorkerJobType;
   status: DisneyWorkerJobStatus;
   phase: DisneyWorkerPhase;
@@ -88,6 +91,10 @@ type PlannerHubJobRecord = {
   lastMessage: string;
   lastError: string;
   events: DisneyWorkerEvent[];
+};
+
+type LocalWorkerDeviceRecord = LocalWorkerDevice & {
+  userId: string;
 };
 
 export type PlannerHubJobDiagnostics = {
@@ -151,6 +158,7 @@ type BackendState = {
   pushSubscriptions: PushSubscriptionRecord[];
   plannerHubSecrets: PlannerHubSecretRecord[];
   plannerHubJobs: PlannerHubJobRecord[];
+  localWorkerDevices: LocalWorkerDeviceRecord[];
   syncMeta: SyncMeta;
 };
 
@@ -169,6 +177,8 @@ const MAX_ACTIVITY_ITEMS_PER_USER = 40;
 const JOB_RETENTION_MS = 1000 * 60 * 60 * 24 * 7;
 const DISNEY_PENDING_PASSWORD_TTL_MS = 1000 * 60 * 15;
 const PLANNER_HUB_JOB_STALE_MS = 1000 * 60 * 10;
+const LOCAL_DEVICE_STALE_MS = 1000 * 60 * 10;
+const LOCAL_WORKER_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
@@ -285,6 +295,15 @@ function normalizePlannerHubConnection(
     next.status = "disconnected";
   }
 
+  if (
+    next.activeDeviceStatus !== "" &&
+    next.activeDeviceStatus !== "inactive" &&
+    next.activeDeviceStatus !== "active" &&
+    next.activeDeviceStatus !== "stale"
+  ) {
+    next.activeDeviceStatus = "";
+  }
+
   if (next.lastJobType !== "" && next.lastJobType !== "connect" && next.lastJobType !== "import" && next.lastJobType !== "booking") {
     next.lastJobType = "";
   }
@@ -318,6 +337,49 @@ function normalizePlannerHubConnection(
   }
 
   return next;
+}
+
+function normalizeLocalWorkerDeviceStatus(value: unknown): LocalWorkerDeviceStatus {
+  return value === "active" || value === "stale" ? value : "inactive";
+}
+
+function normalizeLocalWorkerDevices(value: unknown): LocalWorkerDeviceRecord[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const next = item as Partial<LocalWorkerDeviceRecord>;
+      return {
+        id: typeof next.id === "string" && next.id ? next.id : randomUUID(),
+        userId: typeof next.userId === "string" ? next.userId : "",
+        deviceName: typeof next.deviceName === "string" && next.deviceName ? next.deviceName : "My Mac",
+        platform: typeof next.platform === "string" ? next.platform : "macos",
+        status: normalizeLocalWorkerDeviceStatus(next.status),
+        lastCheckInAt: typeof next.lastCheckInAt === "string" ? next.lastCheckInAt : "",
+        lastSeenAt: typeof next.lastSeenAt === "string" ? next.lastSeenAt : "",
+        lastJobId: typeof next.lastJobId === "string" ? next.lastJobId : "",
+        lastJobPhase:
+          next.lastJobPhase === "queued" ||
+          next.lastJobPhase === "started" ||
+          next.lastJobPhase === "disney_open" ||
+          next.lastJobPhase === "email_step" ||
+          next.lastJobPhase === "password_step" ||
+          next.lastJobPhase === "select_party" ||
+          next.lastJobPhase === "members_imported" ||
+          next.lastJobPhase === "session_captured" ||
+          next.lastJobPhase === "completed" ||
+          next.lastJobPhase === "failed" ||
+          next.lastJobPhase === "paused_login" ||
+          next.lastJobPhase === "paused_mismatch"
+            ? next.lastJobPhase
+            : "",
+        lastJobMessage: typeof next.lastJobMessage === "string" ? next.lastJobMessage : "",
+        claimedPlannerHubId: typeof next.claimedPlannerHubId === "string" ? next.claimedPlannerHubId : "primary",
+        localProfilePath: typeof next.localProfilePath === "string" ? next.localProfilePath : "",
+        hasLocalSession: Boolean(next.hasLocalSession),
+      };
+    });
 }
 
 function normalizeDisneyWorkerEvents(value: unknown): DisneyWorkerEvent[] {
@@ -383,6 +445,7 @@ function normalizePlannerHubJobRecord(value: Partial<PlannerHubJobRecord> | null
     id: typeof value?.id === "string" ? value.id : randomUUID(),
     userId: typeof value?.userId === "string" ? value.userId : "",
     plannerHubId: typeof value?.plannerHubId === "string" && value.plannerHubId ? value.plannerHubId : "primary",
+    assignedDeviceId: typeof value?.assignedDeviceId === "string" ? value.assignedDeviceId : "",
     type:
       value?.type === "connect" || value?.type === "import" || value?.type === "booking"
         ? value.type
@@ -493,7 +556,7 @@ function normalizeSelectedImportedMemberIds(value: unknown): string[] {
 
 function defaultState(): BackendState {
   return {
-    version: 2,
+    version: 3,
     users: [],
     preferences: [],
     watchItems: [],
@@ -502,6 +565,7 @@ function defaultState(): BackendState {
     pushSubscriptions: [],
     plannerHubSecrets: [],
     plannerHubJobs: [],
+    localWorkerDevices: [],
     syncMeta: DEFAULT_SYNC_META,
   };
 }
@@ -547,12 +611,25 @@ function prunePlannerHubJobs(records: PlannerHubJobRecord[], now = Date.now()) {
   });
 }
 
+function refreshLocalWorkerDevices(records: LocalWorkerDeviceRecord[], now = Date.now()) {
+  return records.map((record) => {
+    const seenAt = Date.parse(record.lastSeenAt || record.lastCheckInAt);
+    const isStale = Number.isFinite(seenAt) ? now - seenAt > LOCAL_DEVICE_STALE_MS : false;
+    const nextStatus: LocalWorkerDeviceStatus = isStale ? "stale" : record.status === "active" ? "active" : "inactive";
+    return {
+      ...record,
+      status: nextStatus,
+    };
+  });
+}
+
 function pruneBackendState(state: BackendState): BackendState {
   return {
     ...state,
     activity: pruneActivityItems(state.activity),
     magicLinks: pruneMagicLinks(state.magicLinks),
     plannerHubJobs: prunePlannerHubJobs(state.plannerHubJobs),
+    localWorkerDevices: refreshLocalWorkerDevices(state.localWorkerDevices),
   };
 }
 
@@ -643,6 +720,28 @@ function verifySignedToken<T>(token: string): T | null {
   }
 }
 
+type LocalWorkerTokenPayload = {
+  kind: "local_disney_worker";
+  sub: string;
+  exp: number;
+};
+
+function createLocalWorkerToken(userId: string) {
+  return createSignedToken({
+    kind: "local_disney_worker",
+    sub: userId,
+    exp: Date.now() + LOCAL_WORKER_TOKEN_TTL_MS,
+  });
+}
+
+function verifyLocalWorkerToken(token: string) {
+  const parsed = verifySignedToken<LocalWorkerTokenPayload>(token);
+  if (!parsed || parsed.kind !== "local_disney_worker" || typeof parsed.sub !== "string") {
+    return null;
+  }
+  return parsed;
+}
+
 function hashValue(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -678,6 +777,9 @@ export async function readBackendState(): Promise<BackendState> {
     plannerHubSecrets: Array.isArray(parsed.plannerHubSecrets) ? parsed.plannerHubSecrets : [],
     plannerHubJobs: prunePlannerHubJobs(
       Array.isArray(parsed.plannerHubJobs) ? parsed.plannerHubJobs.map((job) => normalizePlannerHubJobRecord(job)) : []
+    ),
+    localWorkerDevices: refreshLocalWorkerDevices(
+      Array.isArray(parsed.localWorkerDevices) ? normalizeLocalWorkerDevices(parsed.localWorkerDevices) : []
     ),
   };
 }
@@ -897,6 +999,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       plannerHubConnection: createDefaultPlannerHubConnection(),
       latestDisneyJob: null,
       importedDisneyMembers: [],
+      localWorkerDevices: [],
       savedReservationParties: [],
       watchItems: [],
       activity: [],
@@ -914,6 +1017,10 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
   );
   preferences.importedDisneyMembers = normalizeImportedDisneyMembers(preferences.importedDisneyMembers);
   preferences.savedReservationParties = normalizeSavedReservationParties(preferences.savedReservationParties);
+  preferences.plannerHubConnection = applyActiveDeviceToConnection(
+    preferences.plannerHubConnection,
+    getActiveLocalWorkerDevice(state, user.id)
+  );
   if (synchronizePlannerHubConnectionState(state, user.id, preferences)) {
     await writeBackendState(state);
   }
@@ -938,6 +1045,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       ? {
           id: latestDisneyJob.id,
           plannerHubId: latestDisneyJob.plannerHubId,
+          assignedDeviceId: latestDisneyJob.assignedDeviceId,
           type: latestDisneyJob.type,
           status: latestDisneyJob.status,
           phase: latestDisneyJob.phase,
@@ -953,6 +1061,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
         }
       : null,
     importedDisneyMembers: preferences.importedDisneyMembers,
+    localWorkerDevices: getLocalWorkerDevicesForUser(state, user.id).map(({ userId: _userId, ...device }) => device),
     savedReservationParties: preferences.savedReservationParties,
     watchItems: getWatchItemsForUser(state, user.id).map((item) => ({
       id: item.id,
@@ -985,6 +1094,7 @@ export async function resetPlannerHubConnection(userId: string) {
   const plannerHubId = preferences.plannerHubConnection.plannerHubId || "primary";
   const disneyEmail =
     preferences.plannerHubConnection.disneyEmail || preferences.reservationAssist.plannerHubEmail || "";
+  const activeDevice = getActiveLocalWorkerDevice(state, userId);
 
   state.plannerHubJobs = state.plannerHubJobs.filter(
     (job) => !(job.userId === userId && job.plannerHubId === plannerHubId)
@@ -1000,6 +1110,12 @@ export async function resetPlannerHubConnection(userId: string) {
       ...createDefaultPlannerHubConnection(disneyEmail),
       plannerHubId,
       disneyEmail,
+      activeDeviceId: activeDevice?.id || "",
+      activeDeviceName: activeDevice?.deviceName || "",
+      activeDevicePlatform: activeDevice?.platform || "",
+      activeDeviceStatus: activeDevice?.status || "",
+      activeDeviceLastSeenAt: activeDevice?.lastSeenAt || activeDevice?.lastCheckInAt || "",
+      hasLocalSession: activeDevice?.hasLocalSession ?? false,
     },
     disneyEmail
   );
@@ -1115,7 +1231,10 @@ export async function upsertPreferencesForUser(
   latestPreferences.syncFrequency = preferences.syncFrequency;
   latestPreferences.reservationAssist = preferences.reservationAssist;
   latestPreferences.plannerHubBooking = preferences.plannerHubBooking;
-  latestPreferences.plannerHubConnection = preferences.plannerHubConnection;
+  latestPreferences.plannerHubConnection = applyActiveDeviceToConnection(
+    preferences.plannerHubConnection,
+    getActiveLocalWorkerDevice(latestState, userId)
+  );
   latestPreferences.importedDisneyMembers = preferences.importedDisneyMembers;
   latestPreferences.savedReservationParties = preferences.savedReservationParties;
 
@@ -1422,6 +1541,65 @@ function getPlannerHubSecretRecord(state: BackendState, userId: string, plannerH
   return state.plannerHubSecrets.find((item) => item.userId === userId && item.plannerHubId === plannerHubId) ?? null;
 }
 
+function getLocalWorkerDevicesForUser(state: BackendState, userId: string) {
+  return state.localWorkerDevices.filter((item) => item.userId === userId);
+}
+
+function getLocalWorkerDevice(state: BackendState, userId: string, deviceId: string) {
+  return state.localWorkerDevices.find((item) => item.userId === userId && item.id === deviceId) ?? null;
+}
+
+function getActiveLocalWorkerDevice(state: BackendState, userId: string) {
+  const devices = getLocalWorkerDevicesForUser(state, userId);
+  return (
+    devices
+      .filter((device) => device.status === "active")
+      .sort((left, right) => Date.parse(right.lastSeenAt || right.lastCheckInAt) - Date.parse(left.lastSeenAt || left.lastCheckInAt))[0] ??
+    null
+  );
+}
+
+function markOtherDevicesInactive(state: BackendState, userId: string, activeDeviceId: string) {
+  for (const device of state.localWorkerDevices) {
+    if (device.userId !== userId || device.id === activeDeviceId) continue;
+    if (device.status !== "stale") {
+      device.status = "inactive";
+    }
+  }
+}
+
+function upsertLocalWorkerDevice(
+  state: BackendState,
+  userId: string,
+  patch: Pick<LocalWorkerDeviceRecord, "id" | "deviceName" | "platform" | "localProfilePath"> &
+    Partial<
+      Pick<
+        LocalWorkerDeviceRecord,
+        "status" | "lastCheckInAt" | "lastSeenAt" | "lastJobId" | "lastJobPhase" | "lastJobMessage" | "claimedPlannerHubId" | "hasLocalSession"
+      >
+    >
+) {
+  let record = getLocalWorkerDevice(state, userId, patch.id);
+  if (!record) {
+    record = normalizeLocalWorkerDevices([{ userId, ...patch }])[0];
+    state.localWorkerDevices.push(record);
+  }
+
+  record.deviceName = patch.deviceName || record.deviceName || "My Mac";
+  record.platform = patch.platform || record.platform || "macos";
+  record.localProfilePath = patch.localProfilePath || record.localProfilePath;
+  record.status = patch.status ? normalizeLocalWorkerDeviceStatus(patch.status) : record.status;
+  record.lastCheckInAt = patch.lastCheckInAt ?? record.lastCheckInAt;
+  record.lastSeenAt = patch.lastSeenAt ?? record.lastSeenAt;
+  record.lastJobId = patch.lastJobId ?? record.lastJobId;
+  record.lastJobPhase = patch.lastJobPhase ?? record.lastJobPhase;
+  record.lastJobMessage = patch.lastJobMessage ?? record.lastJobMessage;
+  record.claimedPlannerHubId = patch.claimedPlannerHubId ?? record.claimedPlannerHubId;
+  record.hasLocalSession = patch.hasLocalSession ?? record.hasLocalSession;
+
+  return record;
+}
+
 function isPendingPasswordFresh(record: PlannerHubSecretRecord | null) {
   if (!record?.encryptedPendingPassword) return false;
   return Date.now() - Date.parse(record.updatedAt) <= DISNEY_PENDING_PASSWORD_TTL_MS;
@@ -1467,6 +1645,24 @@ function getLatestPlannerHubJobForUser(state: BackendState, userId: string, plan
     state.plannerHubJobs
       .filter((job) => job.userId === userId && job.plannerHubId === plannerHubId)
       .sort((a, b) => Date.parse(b.updatedAt || b.queuedAt) - Date.parse(a.updatedAt || a.queuedAt))[0] ?? null
+  );
+}
+
+function applyActiveDeviceToConnection(
+  connection: PlannerHubConnectionState,
+  device: LocalWorkerDeviceRecord | null
+): PlannerHubConnectionState {
+  return normalizePlannerHubConnection(
+    {
+      ...connection,
+      activeDeviceId: device?.id || "",
+      activeDeviceName: device?.deviceName || "",
+      activeDevicePlatform: device?.platform || "",
+      activeDeviceStatus: device?.status || "",
+      activeDeviceLastSeenAt: device?.lastSeenAt || device?.lastCheckInAt || "",
+      hasLocalSession: device?.hasLocalSession ?? connection.hasLocalSession,
+    },
+    connection.disneyEmail
   );
 }
 
@@ -1559,6 +1755,7 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
   const preferences = getPreferencesFromState(state, userId);
   const now = new Date().toISOString();
   const plannerHubId = preferences.plannerHubConnection.plannerHubId || "primary";
+  const activeDevice = getActiveLocalWorkerDevice(state, userId);
   state.plannerHubJobs = state.plannerHubJobs.filter(
     (existingJob) =>
       !(
@@ -1572,6 +1769,7 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
     id: randomUUID(),
     userId,
     plannerHubId,
+    assignedDeviceId: activeDevice?.id || "",
     type: "connect",
     status: "queued",
     phase: "queued",
@@ -1589,7 +1787,7 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
   };
 
   upsertPlannerHubSecretRecord(state, userId, plannerHubId, {
-    encryptedPendingPassword: encryptSensitiveValue(password),
+    encryptedPendingPassword: password ? encryptSensitiveValue(password) : "",
   });
   state.plannerHubJobs.push(job);
 
@@ -1616,8 +1814,16 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
       lastJobId: job.id,
       lastJobType: "connect",
       lastQueuedJobId: job.id,
-      lastRequiredActionMessage: "Worker is connecting to Disney and capturing session state.",
+      lastRequiredActionMessage: activeDevice
+        ? `Local Disney worker on ${activeDevice.deviceName} is connecting and capturing session state.`
+        : "Open the local Disney worker on one of your Macs so it can claim this queued connection.",
       lastAuthFailureReason: "",
+      activeDeviceId: activeDevice?.id || preferences.plannerHubConnection.activeDeviceId,
+      activeDeviceName: activeDevice?.deviceName || preferences.plannerHubConnection.activeDeviceName,
+      activeDevicePlatform: activeDevice?.platform || preferences.plannerHubConnection.activeDevicePlatform,
+      activeDeviceStatus: activeDevice?.status || preferences.plannerHubConnection.activeDeviceStatus,
+      activeDeviceLastSeenAt:
+        activeDevice?.lastSeenAt || activeDevice?.lastCheckInAt || preferences.plannerHubConnection.activeDeviceLastSeenAt,
     },
     disneyEmail
   );
@@ -1630,17 +1836,14 @@ export async function queuePlannerHubImportJob(userId: string) {
   const state = await readBackendState();
   const preferences = getPreferencesFromState(state, userId);
   const plannerHubId = preferences.plannerHubConnection.plannerHubId || "primary";
-  const secret = getPlannerHubSecretRecord(state, userId, plannerHubId);
-
-  if (!secret?.encryptedSessionState) {
-    throw new Error("Disney session is not connected yet.");
-  }
+  const activeDevice = getActiveLocalWorkerDevice(state, userId);
 
   const now = new Date().toISOString();
   const job: PlannerHubJobRecord = {
     id: randomUUID(),
     userId,
     plannerHubId,
+    assignedDeviceId: activeDevice?.id || "",
     type: "import",
     status: "queued",
     phase: "queued",
@@ -1670,14 +1873,215 @@ export async function queuePlannerHubImportJob(userId: string) {
       lastJobId: job.id,
       lastJobType: "import",
       lastQueuedJobId: job.id,
-      lastRequiredActionMessage: "Worker is importing the current Disney connected members.",
+      lastRequiredActionMessage: activeDevice
+        ? `Local Disney worker on ${activeDevice.deviceName} is importing the current connected members.`
+        : "Open the local Disney worker on one of your Macs so it can claim this queued import.",
       lastAuthFailureReason: "",
+      activeDeviceId: activeDevice?.id || preferences.plannerHubConnection.activeDeviceId,
+      activeDeviceName: activeDevice?.deviceName || preferences.plannerHubConnection.activeDeviceName,
+      activeDevicePlatform: activeDevice?.platform || preferences.plannerHubConnection.activeDevicePlatform,
+      activeDeviceStatus: activeDevice?.status || preferences.plannerHubConnection.activeDeviceStatus,
+      activeDeviceLastSeenAt:
+        activeDevice?.lastSeenAt || activeDevice?.lastCheckInAt || preferences.plannerHubConnection.activeDeviceLastSeenAt,
     },
     preferences.plannerHubConnection.disneyEmail
   );
 
   await writeBackendState(state);
   return job;
+}
+
+export async function issueLocalWorkerPairingToken(userId: string, deviceName = "My Mac") {
+  return {
+    token: createLocalWorkerToken(userId),
+    deviceId: randomUUID(),
+    deviceName,
+  };
+}
+
+export async function checkInLocalWorkerDevice(
+  userId: string,
+  payload: {
+    deviceId: string;
+    deviceName: string;
+    platform: string;
+    localProfilePath: string;
+    hasLocalSession?: boolean;
+  }
+) {
+  const state = await readBackendState();
+  const preferences = getPreferencesFromState(state, userId);
+  const now = new Date().toISOString();
+  const device = upsertLocalWorkerDevice(state, userId, {
+    id: payload.deviceId,
+    deviceName: payload.deviceName,
+    platform: payload.platform,
+    localProfilePath: payload.localProfilePath,
+    status: "active",
+    lastCheckInAt: now,
+    lastSeenAt: now,
+    claimedPlannerHubId: preferences.plannerHubConnection.plannerHubId || "primary",
+    hasLocalSession: payload.hasLocalSession ?? preferences.plannerHubConnection.hasLocalSession,
+  });
+  markOtherDevicesInactive(state, userId, device.id);
+  preferences.plannerHubConnection = applyActiveDeviceToConnection(preferences.plannerHubConnection, device);
+  preferences.plannerHubConnection = normalizePlannerHubConnection(
+    {
+      ...preferences.plannerHubConnection,
+      hasLocalSession: payload.hasLocalSession ?? preferences.plannerHubConnection.hasLocalSession,
+      latestPhaseMessage:
+        preferences.plannerHubConnection.status === "pending_connect" || preferences.plannerHubConnection.status === "importing"
+          ? preferences.plannerHubConnection.latestPhaseMessage
+          : `Local Disney worker on ${device.deviceName} is ready on this account.`,
+      latestJobUpdatedAt: now,
+    },
+    preferences.plannerHubConnection.disneyEmail
+  );
+  state.syncMeta = {
+    ...state.syncMeta,
+    lastWorkerPollAt: now,
+    lastWorkerPollMessage: `Local Disney worker on ${device.deviceName} checked in.`,
+  };
+  await writeBackendState(state);
+  return { device };
+}
+
+export async function claimNextPlannerHubJobForLocalDevice(
+  userId: string,
+  payload: {
+    deviceId: string;
+    deviceName: string;
+    platform: string;
+    localProfilePath: string;
+    hasLocalSession?: boolean;
+  }
+): Promise<PlannerHubClaimResult> {
+  const state = await readBackendState();
+  const pollAt = new Date().toISOString();
+  const preferences = getPreferencesFromState(state, userId);
+  const diagnostics = buildPlannerHubJobDiagnostics(state);
+  const device = upsertLocalWorkerDevice(state, userId, {
+    id: payload.deviceId,
+    deviceName: payload.deviceName,
+    platform: payload.platform,
+    localProfilePath: payload.localProfilePath,
+    status: "active",
+    lastCheckInAt: pollAt,
+    lastSeenAt: pollAt,
+    claimedPlannerHubId: preferences.plannerHubConnection.plannerHubId || "primary",
+    hasLocalSession: payload.hasLocalSession ?? preferences.plannerHubConnection.hasLocalSession,
+  });
+  markOtherDevicesInactive(state, userId, device.id);
+  preferences.plannerHubConnection = applyActiveDeviceToConnection(preferences.plannerHubConnection, device);
+
+  let job = state.plannerHubJobs.find((entry) => entry.userId === userId && entry.status === "queued");
+  if (!job) {
+    state.syncMeta = {
+      ...state.syncMeta,
+      lastWorkerPollAt: pollAt,
+      lastWorkerPollMessage: `Local Disney worker on ${device.deviceName} checked in, but no queued planner-hub job was waiting.`,
+    };
+    preferences.plannerHubConnection = normalizePlannerHubConnection(
+      {
+        ...preferences.plannerHubConnection,
+        latestJobUpdatedAt: pollAt,
+      },
+      preferences.plannerHubConnection.disneyEmail
+    );
+    await writeBackendState(state);
+    return null;
+  }
+
+  if (job.type === "connect") {
+    const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
+    if (secret?.encryptedPendingPassword && !isPendingPasswordFresh(secret)) {
+      job.status = "failed";
+      job.phase = "failed";
+      job.finishedAt = pollAt;
+      job.updatedAt = pollAt;
+      job.lastMessage = "Disney password handoff expired before the local worker claimed it.";
+      job.lastError = job.lastMessage;
+      job.events = [...normalizeDisneyWorkerEvents(job.events), { phase: "failed", at: pollAt, message: job.lastMessage }];
+      upsertPlannerHubSecretRecord(state, job.userId, job.plannerHubId, {
+        encryptedPendingPassword: "",
+      });
+      preferences.plannerHubConnection = normalizePlannerHubConnection(
+        {
+          ...preferences.plannerHubConnection,
+          status: "paused_login",
+          latestJobStatus: "failed",
+          latestPhase: "paused_login",
+          latestPhaseMessage: "Stored Disney password handoff expired before this Mac claimed the job.",
+          latestPhaseAt: pollAt,
+          latestJobUpdatedAt: pollAt,
+          lastAuthFailureReason: "Stored Disney password handoff expired before this Mac claimed the job.",
+          lastRequiredActionMessage: "Connect Disney again or refresh the local session on this Mac.",
+          lastReportedJobId: job.id,
+        },
+        preferences.plannerHubConnection.disneyEmail
+      );
+      await writeBackendState(state);
+      return null;
+    }
+  }
+
+  job.assignedDeviceId = device.id;
+  job.status = "processing";
+  job.claimedAt = pollAt;
+  job.startedAt = job.startedAt || pollAt;
+  job.attempts += 1;
+  appendJobEvent(job, "started", `Local worker on ${device.deviceName} started the ${job.type} job.`, pollAt);
+  device.lastJobId = job.id;
+  device.lastJobPhase = "started";
+  device.lastJobMessage = `Started ${job.type} job.`;
+  state.syncMeta = {
+    ...state.syncMeta,
+    lastWorkerPollAt: pollAt,
+    lastWorkerPollMessage: `Local Disney worker on ${device.deviceName} claimed the ${job.type} job.`,
+  };
+  preferences.plannerHubConnection = normalizePlannerHubConnection(
+    {
+      ...preferences.plannerHubConnection,
+      status: job.type === "import" ? "importing" : "pending_connect",
+      latestJobStatus: "processing",
+      latestPhase: "started",
+      latestPhaseMessage: `Local worker on ${device.deviceName} started the ${job.type} job.`,
+      latestPhaseAt: pollAt,
+      latestJobUpdatedAt: pollAt,
+      lastClaimedJobId: job.id,
+      lastJobId: job.id,
+      lastJobType: job.type,
+      lastRequiredActionMessage: `Local Disney worker on ${device.deviceName} is processing this job.`,
+      activeDeviceId: device.id,
+      activeDeviceName: device.deviceName,
+      activeDevicePlatform: device.platform,
+      activeDeviceStatus: device.status,
+      activeDeviceLastSeenAt: device.lastSeenAt,
+      hasLocalSession: device.hasLocalSession,
+    },
+    preferences.plannerHubConnection.disneyEmail
+  );
+  const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
+  await writeBackendState(state);
+
+  return {
+    job: {
+      id: job.id,
+      type: job.type,
+      userId: job.userId,
+      plannerHubId: job.plannerHubId,
+      disneyEmail: job.disneyEmail,
+    },
+    payload: {
+      disneyEmail: job.disneyEmail || preferences.plannerHubConnection.disneyEmail,
+      password:
+        job.type === "connect" && secret?.encryptedPendingPassword
+          ? decryptSensitiveValue(secret.encryptedPendingPassword)
+          : "",
+      sessionState: null,
+    },
+    diagnostics,
+  };
 }
 
 export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
@@ -1805,6 +2209,8 @@ export async function reportPlannerHubJobProgress(
     phase: DisneyWorkerPhase;
     message: string;
     reportedBy?: string;
+    deviceId?: string;
+    hasLocalSession?: boolean;
   }
 ) {
   const state = await readBackendState();
@@ -1833,7 +2239,21 @@ export async function reportPlannerHubJobProgress(
             ? "failed"
             : job.type === "import"
               ? "importing"
-              : "pending_connect";
+            : "pending_connect";
+
+  const device = payload.deviceId ? getLocalWorkerDevice(state, job.userId, payload.deviceId) : null;
+  if (device) {
+    job.assignedDeviceId = device.id;
+    device.lastSeenAt = now;
+    device.lastJobId = job.id;
+    device.lastJobPhase = payload.phase;
+    device.lastJobMessage = payload.message;
+    device.status = "active";
+    if (payload.hasLocalSession !== undefined) {
+      device.hasLocalSession = payload.hasLocalSession;
+    }
+    markOtherDevicesInactive(state, job.userId, device.id);
+  }
 
   preferences.plannerHubConnection = normalizePlannerHubConnection(
     {
@@ -1853,6 +2273,12 @@ export async function reportPlannerHubJobProgress(
           : payload.phase === "paused_mismatch"
             ? "Disney opened, but the expected planner flow or party no longer matched."
             : preferences.plannerHubConnection.lastRequiredActionMessage,
+      activeDeviceId: device?.id || preferences.plannerHubConnection.activeDeviceId,
+      activeDeviceName: device?.deviceName || preferences.plannerHubConnection.activeDeviceName,
+      activeDevicePlatform: device?.platform || preferences.plannerHubConnection.activeDevicePlatform,
+      activeDeviceStatus: device?.status || preferences.plannerHubConnection.activeDeviceStatus,
+      activeDeviceLastSeenAt: device?.lastSeenAt || preferences.plannerHubConnection.activeDeviceLastSeenAt,
+      hasLocalSession: payload.hasLocalSession ?? device?.hasLocalSession ?? preferences.plannerHubConnection.hasLocalSession,
     },
     preferences.plannerHubConnection.disneyEmail || job.disneyEmail
   );
@@ -1878,6 +2304,8 @@ export async function completePlannerHubJob(
     lastRequiredActionMessage?: string;
     note?: string;
     reportedBy?: string;
+    deviceId?: string;
+    hasLocalSession?: boolean;
   }
 ) {
   const state = await readBackendState();
@@ -1906,6 +2334,33 @@ export async function completePlannerHubJob(
 
   if (importedMembers.length > 0) {
     preferences.importedDisneyMembers = importedMembers;
+  }
+
+  const device = payload.deviceId ? getLocalWorkerDevice(state, job.userId, payload.deviceId) : null;
+  if (device) {
+    job.assignedDeviceId = device.id;
+    device.lastSeenAt = now;
+    device.lastJobId = job.id;
+    device.lastJobPhase =
+      payload.status === "connected"
+        ? "completed"
+        : payload.status === "paused_login"
+          ? "paused_login"
+          : payload.status === "paused_mismatch"
+            ? "paused_mismatch"
+            : "failed";
+    device.lastJobMessage =
+      payload.note ||
+      payload.lastAuthFailureReason ||
+      payload.lastRequiredActionMessage ||
+      (payload.ok ? "Disney worker finished successfully." : "Disney worker failed closed.");
+    device.status = "active";
+    if (payload.hasLocalSession !== undefined) {
+      device.hasLocalSession = payload.hasLocalSession;
+    } else if (payload.status === "connected") {
+      device.hasLocalSession = true;
+    }
+    markOtherDevicesInactive(state, job.userId, device.id);
   }
 
   const nextConnection = normalizePlannerHubConnection(
@@ -1938,7 +2393,16 @@ export async function completePlannerHubJob(
       lastWorkerResultAt: now,
       lastWorkerResultSource: payload.reportedBy ?? "",
       hasEncryptedSession: Boolean(encryptedSessionState) || preferences.plannerHubConnection.hasEncryptedSession,
+      hasLocalSession:
+        payload.hasLocalSession ??
+        device?.hasLocalSession ??
+        (payload.status === "connected" || preferences.plannerHubConnection.hasLocalSession),
       importedMemberCount: importedMembers.length > 0 ? importedMembers.length : preferences.importedDisneyMembers.length,
+      activeDeviceId: device?.id || preferences.plannerHubConnection.activeDeviceId,
+      activeDeviceName: device?.deviceName || preferences.plannerHubConnection.activeDeviceName,
+      activeDevicePlatform: device?.platform || preferences.plannerHubConnection.activeDevicePlatform,
+      activeDeviceStatus: device?.status || preferences.plannerHubConnection.activeDeviceStatus,
+      activeDeviceLastSeenAt: device?.lastSeenAt || preferences.plannerHubConnection.activeDeviceLastSeenAt,
     },
     job.disneyEmail || preferences.plannerHubConnection.disneyEmail
   );
@@ -2017,15 +2481,12 @@ export async function getPlannerHubDiagnosticsForUser(userId: string) {
 
 export async function getDisneyStatusForUser(user: StoredUser | null) {
   const state = await readBackendState();
+  const preferences = user ? getPreferencesFromState(state, user.id) : null;
   const plannerHubConnection = user
-    ? getPreferencesFromState(state, user.id).plannerHubConnection
+    ? applyActiveDeviceToConnection(preferences!.plannerHubConnection, getActiveLocalWorkerDevice(state, user.id))
     : createDefaultPlannerHubConnection();
-  const reservationAssist = user
-    ? getPreferencesFromState(state, user.id).reservationAssist
-    : createDefaultReservationAssist();
-  const importedDisneyMembers = user
-    ? getPreferencesFromState(state, user.id).importedDisneyMembers
-    : [];
+  const reservationAssist = user ? preferences!.reservationAssist : createDefaultReservationAssist();
+  const importedDisneyMembers = user ? preferences!.importedDisneyMembers : [];
   const latestDisneyJob = user
     ? getLatestPlannerHubJobForUser(state, user.id, plannerHubConnection.plannerHubId || "primary")
     : null;
@@ -2034,11 +2495,13 @@ export async function getDisneyStatusForUser(user: StoredUser | null) {
     plannerHubConnection,
     reservationAssist,
     importedDisneyMembers,
+    localWorkerDevices: user ? getLocalWorkerDevicesForUser(state, user.id).map(({ userId: _userId, ...device }) => device) : [],
     syncMeta: state.syncMeta,
     latestDisneyJob: latestDisneyJob
       ? {
           id: latestDisneyJob.id,
           plannerHubId: latestDisneyJob.plannerHubId,
+          assignedDeviceId: latestDisneyJob.assignedDeviceId,
           type: latestDisneyJob.type,
           status: latestDisneyJob.status,
           phase: latestDisneyJob.phase,
@@ -2066,6 +2529,14 @@ export function isAuthorizedWorkerRequest(request: Request) {
   const headerSecret = request.headers.get("x-cron-secret");
   const bearer = authHeader?.replace(/^Bearer\s+/i, "");
   return acceptedSecrets.includes(bearer || "") || acceptedSecrets.includes(headerSecret || "");
+}
+
+export function getUserIdFromLocalWorkerRequest(request: Request) {
+  const authHeader = request.headers.get("authorization");
+  const bearer = authHeader?.replace(/^Bearer\s+/i, "");
+  const token = bearer || request.headers.get("x-local-worker-token") || "";
+  const payload = verifyLocalWorkerToken(token);
+  return payload?.sub || null;
 }
 
 export async function persistActivityForUser(

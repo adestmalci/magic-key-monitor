@@ -31,6 +31,7 @@ export type DisneyPlannerConnectionStatus =
   | "failed";
 export type DisneyWorkerJobType = "connect" | "import" | "booking";
 export type DisneyWorkerJobStatus = "queued" | "processing" | "completed" | "failed";
+export type LocalWorkerDeviceStatus = "inactive" | "active" | "stale";
 export type DisneyWorkerPhase =
   | "queued"
   | "started"
@@ -129,6 +130,11 @@ export type PlannerHubConnectionState = {
   plannerHubId: string;
   disneyEmail: string;
   status: DisneyPlannerConnectionStatus;
+  activeDeviceId: string;
+  activeDeviceName: string;
+  activeDevicePlatform: string;
+  activeDeviceStatus: LocalWorkerDeviceStatus | "";
+  activeDeviceLastSeenAt: string;
   latestJobStatus: DisneyWorkerJobStatus | "";
   latestPhase: DisneyWorkerPhase | "";
   latestPhaseMessage: string;
@@ -145,6 +151,7 @@ export type PlannerHubConnectionState = {
   lastWorkerResultAt: string;
   lastWorkerResultSource: string;
   hasEncryptedSession: boolean;
+  hasLocalSession: boolean;
   importedMemberCount: number;
 };
 
@@ -157,6 +164,7 @@ export type DisneyWorkerEvent = {
 export type DisneyWorkerJob = {
   id: string;
   plannerHubId: string;
+  assignedDeviceId: string;
   type: DisneyWorkerJobType;
   status: DisneyWorkerJobStatus;
   phase: DisneyWorkerPhase;
@@ -169,6 +177,21 @@ export type DisneyWorkerJob = {
   reportedBy: string;
   attemptCount: number;
   events: DisneyWorkerEvent[];
+};
+
+export type LocalWorkerDevice = {
+  id: string;
+  deviceName: string;
+  platform: string;
+  status: LocalWorkerDeviceStatus;
+  lastCheckInAt: string;
+  lastSeenAt: string;
+  lastJobId: string;
+  lastJobPhase: DisneyWorkerPhase | "";
+  lastJobMessage: string;
+  claimedPlannerHubId: string;
+  localProfilePath: string;
+  hasLocalSession: boolean;
 };
 
 export type ImportedDisneyMember = {
@@ -223,6 +246,7 @@ export type DashboardUserState = {
   plannerHubConnection: PlannerHubConnectionState;
   latestDisneyJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
+  localWorkerDevices: LocalWorkerDevice[];
   savedReservationParties: SavedReservationParty[];
   watchItems: WatchItem[];
   activity: ActivityItem[];
@@ -265,6 +289,11 @@ export function createDefaultPlannerHubConnection(disneyEmail = ""): PlannerHubC
     plannerHubId: "primary",
     disneyEmail,
     status: "disconnected",
+    activeDeviceId: "",
+    activeDeviceName: "",
+    activeDevicePlatform: "",
+    activeDeviceStatus: "",
+    activeDeviceLastSeenAt: "",
     latestJobStatus: "",
     latestPhase: "",
     latestPhaseMessage: "",
@@ -281,6 +310,7 @@ export function createDefaultPlannerHubConnection(disneyEmail = ""): PlannerHubC
     lastWorkerResultAt: "",
     lastWorkerResultSource: "",
     hasEncryptedSession: false,
+    hasLocalSession: false,
     importedMemberCount: 0,
   };
 }

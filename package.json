@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "worker:disney": "node scripts/disney-worker-service.mjs"
+    "worker:disney": "node scripts/disney-worker-service.mjs",
+    "worker:disney:local": "node scripts/disney-worker-service.mjs",
+    "worker:disney:login": "node scripts/disney-local-login.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",
