@@ -237,24 +237,24 @@ export function AddWatchForm({
             </div>
           </div>
 
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-[24px] border border-zinc-200 bg-white/80 p-4 text-center shadow-sm shadow-zinc-200/50">
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-[24px] border border-zinc-200 bg-white/80 p-5 shadow-sm shadow-zinc-200/50">
               <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Tracked dates</div>
-              <div className="mt-2 text-3xl font-semibold text-zinc-900">{watchCount}</div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-left text-xs text-emerald-900">
+              <div className="mt-4 text-center text-[2.5rem] font-semibold tracking-tight text-zinc-900">{watchCount}</div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="min-h-[84px] rounded-2xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-left text-xs text-emerald-900">
                   <div className="font-semibold">Dates with availability</div>
-                  <div className="mt-1 text-lg font-semibold">{summary.available}</div>
+                  <div className="mt-2 text-2xl font-semibold leading-none">{summary.available}</div>
                 </div>
-                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-xs text-zinc-700">
+                <div className="min-h-[84px] rounded-2xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-left text-xs text-zinc-700">
                   <div className="font-semibold">No reservations available</div>
-                  <div className="mt-1 text-lg font-semibold">{summary.unavailable}</div>
+                  <div className="mt-2 text-2xl font-semibold leading-none">{summary.unavailable}</div>
                 </div>
               </div>
             </div>
-            <div className="flex min-h-[168px] flex-col justify-center rounded-[24px] border border-zinc-200 bg-white/80 p-4 shadow-sm shadow-zinc-200/50 sm:p-5">
+            <div className="rounded-[24px] border border-zinc-200 bg-white/80 p-5 shadow-sm shadow-zinc-200/50">
               <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{headlineLabel}</div>
-              <div className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 sm:text-4xl">{formatSyncTime(checkedAt)}</div>
+              <div className="mt-4 text-[2.25rem] font-semibold tracking-tight text-zinc-900">{formatSyncTime(checkedAt)}</div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <div className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-[11px] font-medium text-violet-800">
                   {modeLabel}

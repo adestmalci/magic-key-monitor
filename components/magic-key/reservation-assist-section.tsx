@@ -1437,10 +1437,10 @@ export function ReservationAssistSection({
             </span>
           </div>
 
-          <div className="mt-4 space-y-4">
-            <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-4 py-4">
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-5 py-5">
               <div className="text-sm font-semibold text-zinc-900">Magic Key members</div>
-              <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              <div className="mt-3 space-y-3">
                 {magicKeyMembers.length === 0 ? (
                   <p className="text-sm text-zinc-500">No imported Magic Key members yet.</p>
                 ) : (
@@ -1450,25 +1450,25 @@ export function ReservationAssistSection({
                     return (
                       <div
                         key={member.id}
-                        className="rounded-[24px] border border-violet-100 bg-white px-4 py-4 text-sm text-zinc-700 shadow-sm shadow-violet-100/40"
+                        className="rounded-[24px] border border-violet-100 bg-white px-5 py-4 text-sm text-zinc-700 shadow-sm shadow-violet-100/40"
                       >
-                        <div className="flex items-center gap-4">
+                        <div className="grid grid-cols-[52px_minmax(0,1fr)] items-center gap-4">
                           {passMeta ? (
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-violet-100 bg-violet-50">
-                              <PassIcon passType={passMeta.id} size="h-7 w-7" />
+                            <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[18px] border border-violet-100 bg-violet-50">
+                              <PassIcon passType={passMeta.id} size="h-6 w-6" />
                             </div>
                           ) : null}
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</div>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <div className="min-w-0 truncate text-[0.98rem] font-semibold leading-tight text-zinc-900">{member.displayName}</div>
                               {passMeta ? (
-                                <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
-                                  {passMeta.short} Key
+                                <span className="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
+                                  {passMeta.short}
                                 </span>
                               ) : null}
                             </div>
                             {cleanLabel && (
-                              <div className="mt-1 text-sm leading-6 text-zinc-600">{cleanLabel}</div>
+                              <div className="mt-1 truncate text-sm leading-6 text-zinc-600">{cleanLabel}</div>
                             )}
                           </div>
                         </div>
@@ -1479,7 +1479,7 @@ export function ReservationAssistSection({
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-4 py-4">
+            <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-5 py-5">
               <div className="text-sm font-semibold text-zinc-900">Ticket holders</div>
               <div className="mt-3 space-y-3">
                 {ticketHolders.length === 0 ? (
@@ -1488,14 +1488,14 @@ export function ReservationAssistSection({
                   ticketHolders.map((member) => {
                     const cleanLabel = cleanDisplayLabel(member.passLabel || member.entitlementLabel);
                     return (
-                    <div key={member.id} className="rounded-[24px] border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
-                      <div className="font-semibold text-zinc-900">{member.displayName}</div>
-                      <div className="mt-1 text-zinc-500">{cleanLabel}</div>
-                      <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
-                        Shown for party reference
+                      <div key={member.id} className="max-w-[360px] rounded-[24px] border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
+                        <div className="font-semibold text-zinc-900">{member.displayName}</div>
+                        <div className="mt-1 text-zinc-500">{cleanLabel}</div>
+                        <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
+                          Shown for party reference
+                        </div>
                       </div>
-                    </div>
-                  );
+                    );
                   })
                 )}
               </div>
@@ -1513,13 +1513,13 @@ export function ReservationAssistSection({
               <p className="mt-3 text-sm leading-6 text-zinc-600">Add a watched date first, then choose the imported Disney members who should be targeted for that date.</p>
             ) : (
               <>
-                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(360px,1fr)_auto] lg:items-end">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_208px] lg:items-end">
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-zinc-700">Watched date</span>
                     <select
                       value={currentTarget?.id ?? ""}
                       onChange={(event) => setTargetWatchId(event.target.value)}
-                      className="w-full min-w-[360px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
+                      className="w-full min-w-0 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
                     >
                       {watchItems.map((item) => {
                         const passName = PASS_TYPES.find((pass) => pass.id === item.passType)?.name ?? item.passType;
@@ -1536,14 +1536,14 @@ export function ReservationAssistSection({
                     onClick={handleToggleAutoBooking}
                     disabled={!currentTarget}
                     className={classNames(
-                      "inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition lg:min-w-[210px]",
+                      "inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition lg:w-[208px]",
                       targetAutoBookingEnabled
                         ? "border border-violet-200 bg-violet-600 text-white"
                         : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50",
                       !currentTarget ? "cursor-not-allowed opacity-50" : ""
                     )}
                   >
-                    {targetAutoBookingEnabled ? "Auto booking on" : "Turn on auto booking"}
+                    {targetAutoBookingEnabled ? "Turn off auto booking" : "Turn on auto booking"}
                   </button>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-zinc-600">{watchTargetStatus.message}</p>
@@ -1555,7 +1555,7 @@ export function ReservationAssistSection({
                         Import the connected Disney party first so you can choose Magic Key targets for this watched date.
                       </div>
                     ) : (
-                      <div className="grid gap-3 xl:grid-cols-2">
+                      <div className="space-y-3">
                         {magicKeyTargetRows.map(({ member, eligibility, selected }) => {
                           const disabled = !eligibility.eligible && !selected;
                           const passMeta = passMetaForMember(member);
@@ -1565,56 +1565,58 @@ export function ReservationAssistSection({
                             <label
                               key={member.id}
                               className={classNames(
-                                "flex items-start gap-3 rounded-[24px] border bg-white px-4 py-4 text-sm shadow-sm transition",
+                                "block rounded-[24px] border bg-white px-5 py-4 text-sm shadow-sm transition",
                                 selected
                                   ? "border-violet-200 bg-violet-50/60 text-zinc-800"
                                   : "border-zinc-200 text-zinc-700",
                                 disabled ? "opacity-70" : ""
                               )}
                             >
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                disabled={disabled}
-                                onChange={(event) => {
-                                  const nextIds = event.target.checked
-                                    ? [...currentTarget.selectedImportedMemberIds, member.id]
-                                    : currentTarget.selectedImportedMemberIds.filter((id) => id !== member.id);
-                                  onWatchItemBookingChange(currentTarget.id, {
-                                    plannerHubId: plannerHubConnection.plannerHubId || "primary",
-                                    selectedImportedMemberIds: nextIds,
-                                  });
-                                }}
-                                className="mt-1 h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
-                              />
-                              <span className="min-w-0 flex-1">
-                                <span className="flex items-center gap-3">
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  disabled={disabled}
+                                  onChange={(event) => {
+                                    const nextIds = event.target.checked
+                                      ? [...currentTarget.selectedImportedMemberIds, member.id]
+                                      : currentTarget.selectedImportedMemberIds.filter((id) => id !== member.id);
+                                    onWatchItemBookingChange(currentTarget.id, {
+                                      plannerHubId: plannerHubConnection.plannerHubId || "primary",
+                                      selectedImportedMemberIds: nextIds,
+                                    });
+                                  }}
+                                  className="h-4 w-4 shrink-0 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="grid grid-cols-[52px_minmax(0,1fr)] items-center gap-4">
                                   {passMeta ? (
-                                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-violet-100 bg-violet-50">
-                                      <PassIcon passType={passMeta.id} size="h-7 w-7" />
+                                    <span className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[18px] border border-violet-100 bg-violet-50">
+                                      <PassIcon passType={passMeta.id} size="h-6 w-6" />
                                     </span>
                                   ) : null}
                                   <span className="min-w-0 flex-1">
-                                    <span className="flex flex-wrap items-center gap-2">
-                                      <span className="block text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</span>
+                                    <span className="flex min-w-0 items-center gap-2">
+                                      <span className="min-w-0 truncate text-[0.98rem] font-semibold leading-tight text-zinc-900">{member.displayName}</span>
                                       {passMeta ? (
-                                        <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
-                                          {passMeta.short} Key
+                                        <span className="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
+                                          {passMeta.short}
                                         </span>
                                       ) : null}
                                     </span>
-                                    <span className="mt-1 block text-sm leading-6 text-zinc-600">{cleanLabel}</span>
+                                    <span className="mt-1 block truncate text-sm leading-6 text-zinc-600">{cleanLabel}</span>
+                                    <span
+                                      className={classNames(
+                                        "mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
+                                        eligibilityTone(eligibility.status)
+                                      )}
+                                    >
+                                      {nextLabel}
+                                    </span>
                                   </span>
                                 </span>
-                                <span
-                                  className={classNames(
-                                    "mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
-                                    eligibilityTone(eligibility.status)
-                                  )}
-                                >
-                                  {nextLabel}
                                 </span>
-                              </span>
+                              </div>
                             </label>
                           );
                         })}
