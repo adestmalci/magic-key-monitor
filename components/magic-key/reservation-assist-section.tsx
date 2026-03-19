@@ -387,7 +387,7 @@ export function ReservationAssistSection({
         ? "paused_login"
         : plannerHubConnection.status === "paused_mismatch" || reservationAssist.lastHandoffOutcome === "party_mismatch"
           ? "paused_mismatch"
-          : plannerHubConnection.status === "connected" && selectedCount > 0
+          : plannerHubConnection.status === "connected" && selectedCount > 0 && reservationAssist.stepTwoVerified
             ? "armed"
             : "idle";
 
@@ -397,6 +397,8 @@ export function ReservationAssistSection({
         ? "Reconnect the Disney planner hub so the worker has a live session again."
       : plannerHubConnection.status === "paused_mismatch"
           ? "Re-import the connected party and verify the Disney flow again."
+          : !reservationAssist.stepTwoVerified
+              ? "Finish the Step 2 Disney verification sign-off in Connection maintenance before booking can run."
           : selectedCount === 0
               ? "Choose at least one eligible imported Magic Key member on a watched date."
               : "The planner hub foundation is ready for future booking attempts.";
@@ -408,6 +410,8 @@ export function ReservationAssistSection({
           ? "Background booking is paused because Disney login needs attention."
           : nextStatus === "paused_mismatch"
             ? "Background booking is paused because the imported Disney party no longer matches expectations."
+            : !reservationAssist.stepTwoVerified
+              ? "Background booking is staged but waiting for the Step 2 Disney verification sign-off."
             : "Background booking foundation is staged but not armed yet.";
 
     if (
@@ -429,6 +433,7 @@ export function ReservationAssistSection({
     plannerHubBooking.status,
     plannerHubConnection.status,
     reservationAssist.lastHandoffOutcome,
+    reservationAssist.stepTwoVerified,
     watchItems,
     bookingJobActive,
   ]);
@@ -667,6 +672,14 @@ export function ReservationAssistSection({
       };
     }
 
+    if (!reservationAssist.stepTwoVerified) {
+      return {
+        label: "Finish sign-off",
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        message: "Open Connection maintenance and finish the Step 2 Disney verification sign-off before auto booking can run.",
+      };
+    }
+
     if (selectedCount === 0) {
       return {
         label: "Needs member selection",
@@ -705,6 +718,7 @@ export function ReservationAssistSection({
     currentTargetNeedsTieBreaker,
     plannerHubConnection.hasLocalSession,
     plannerHubConnection.status,
+    reservationAssist.stepTwoVerified,
     selectedCount,
     selectedEligibleRows,
     selectedUnavailableRows,
@@ -719,12 +733,26 @@ export function ReservationAssistSection({
     const currentBookingIsActive =
       bookingJobActive &&
       (!latestBookingJob?.targetWatchItemId || latestBookingJob.targetWatchItemId === currentTarget.id);
+    const currentBookingWasJustQueued =
+      !currentBookingIsActive &&
+      plannerHubBooking.lastBookingStatus === "queued" &&
+      plannerHubBooking.lastBookedWatchItemId === currentTarget.id;
 
     if (currentBookingIsActive) {
       return {
         label: "Attempting now",
         tone: "border-sky-200 bg-sky-50 text-sky-900",
         message: latestBookingJob?.lastMessage || "Your active Mac is refreshing the party and trying this watched date now.",
+      };
+    }
+
+    if (currentBookingWasJustQueued) {
+      return {
+        label: "Queued",
+        tone: "border-sky-200 bg-sky-50 text-sky-900",
+        message:
+          plannerHubBooking.lastBookingMessage ||
+          "A booking attempt was queued for this watched date and is waiting for your active Mac to claim it.",
       };
     }
 
@@ -746,6 +774,9 @@ export function ReservationAssistSection({
     currentTargetNeedsTieBreaker,
     latestBookingJob?.lastMessage,
     latestBookingJob?.targetWatchItemId,
+    plannerHubBooking.lastBookedWatchItemId,
+    plannerHubBooking.lastBookingMessage,
+    plannerHubBooking.lastBookingStatus,
     targetAutoBookingEnabled,
   ]);
 
