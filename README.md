@@ -2,22 +2,62 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Scheduler Setup
 
-This project is set up to keep the website on Vercel while running background syncs from GitHub Actions every 5 minutes.
+This project is set up to keep the website on Vercel while running background watchlist syncs from `cron-job.org`.
 
-Add these GitHub repository secrets before enabling the workflow:
+Use `cron-job.org` to hit the deployed scheduler endpoint every 5 minutes:
 
-- `MAGIC_KEY_APP_URL`
-  - Your deployed app URL, for example `https://your-app.vercel.app`
-- `CRON_SECRET`
-  - Must match the `CRON_SECRET` value used by the app environment on Vercel
+- URL
+  - `https://your-app.vercel.app/api/cron/sync`
+- Method
+  - `GET`
+- Custom header
+  - `x-cron-secret: <CRON_SECRET>`
 
-The workflow file lives at [`.github/workflows/sync-magic-key.yml`](./.github/workflows/sync-magic-key.yml).
+The app route accepts either:
 
-The scheduler is considered healthy only when GitHub Actions actually reaches:
+- `x-cron-secret: <CRON_SECRET>`
+- `Authorization: Bearer <CRON_SECRET>`
+
+`cron-job.org` supports arbitrary custom headers, so the simplest setup is:
+
+1. Create a job in `cron-job.org`
+2. Set it to run every 5 minutes
+3. Point it at `https://your-app.vercel.app/api/cron/sync`
+4. Add header `x-cron-secret` with the same `CRON_SECRET` value used by the app on Vercel
+
+The scheduler is considered healthy only when the scheduler actually reaches:
 
 - `GET /api/cron/sync`
 
-If the workflow stops before the request reaches the backend, the app will keep showing the last recorded scheduler heartbeat until it becomes delayed or stale.
+If `cron-job.org` stops before the request reaches the backend, the app will keep showing the last recorded scheduler heartbeat until it becomes delayed or stale.
+
+### Required app environment variable
+
+- `CRON_SECRET`
+  - Set this in Vercel
+  - Reuse the exact same value in the `cron-job.org` custom header
+
+### Recommended cron-job.org settings
+
+- Frequency: every 5 minutes
+- Timeout: leave the default unless you have a reason to change it
+- Follow redirects: enabled
+- Notifications: enabled for failures
+
+### What success looks like
+
+A healthy run returns HTTP `200` with JSON similar to:
+
+```json
+{ "ok": true }
+```
+
+The top sync strip in the app should then update:
+
+- `Live Calendar: ...`
+- `Auto Scheduler: ...`
+
+The `Auto Scheduler` time is the scheduler heartbeat. It is intentionally separate from the live calendar time.
 
 ## Disney Worker Setup (Local macOS)
 
@@ -78,7 +118,7 @@ to establish the local device flow.
 The existing Railway/GitHub worker files remain in the repo for compatibility and future cloud work, but the intended v1 path is now:
 
 - local macOS Disney worker for connect/import
-- GitHub Actions only for background watchlist sync
+- `cron-job.org` only for background watchlist sync
 
 ## Hosted Storage Setup
 
