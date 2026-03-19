@@ -253,6 +253,11 @@ function passMetaForMember(member: ImportedDisneyMember) {
   return PASS_TYPES.find((pass) => pass.id === member.magicKeyPassType) ?? null;
 }
 
+function cleanDisplayLabel(label: string | undefined | null) {
+  if (!label) return "";
+  return label.replace(/\s+\(([^)]+)\)\s*$/, "").trim();
+}
+
 export function ReservationAssistSection({
   reservationAssist,
   plannerHubBooking,
@@ -1420,7 +1425,7 @@ export function ReservationAssistSection({
           </div>
 
           <p className="mt-3 text-sm leading-6 text-zinc-600">
-            Magic Key members can be targeted for automatic booking. Ticket holders stay visible so the connected Disney party stays truthful, but they are not auto-booked.
+            Magic Key members can be used for automatic booking. Ticket holders stay visible so the connected Disney party stays truthful, but they are not auto-booked.
           </p>
 
           <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold">
@@ -1432,30 +1437,38 @@ export function ReservationAssistSection({
             </span>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
             <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-4 py-4">
               <div className="text-sm font-semibold text-zinc-900">Magic Key members</div>
-              <div className="mt-3 grid gap-3 2xl:grid-cols-2">
+              <div className="mt-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
                 {magicKeyMembers.length === 0 ? (
                   <p className="text-sm text-zinc-500">No imported Magic Key members yet.</p>
                 ) : (
                   magicKeyMembers.map((member) => {
                     const passMeta = passMetaForMember(member);
+                    const cleanLabel = cleanDisplayLabel(member.passLabel || member.entitlementLabel);
                     return (
                       <div
                         key={member.id}
                         className="rounded-[24px] border border-violet-100 bg-white px-4 py-4 text-sm text-zinc-700 shadow-sm shadow-violet-100/40"
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-4">
                           {passMeta ? (
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] bg-gradient-to-br from-violet-100 via-fuchsia-50 to-white ring-1 ring-violet-100">
-                              <PassIcon passType={passMeta.id} size="h-8 w-8" />
+                            <div className={classNames("flex h-16 w-16 shrink-0 items-center justify-center rounded-[22px] bg-gradient-to-br to-white ring-1 ring-violet-100", passMeta.accent, "from-white/70")}>
+                              <PassIcon passType={passMeta.id} size="h-9 w-9" />
                             </div>
                           ) : null}
                           <div className="min-w-0 flex-1">
-                            <div className="text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</div>
-                            {(member.passLabel || member.entitlementLabel) && (
-                              <div className="mt-1 text-sm font-medium text-zinc-600">{member.passLabel || member.entitlementLabel}</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</div>
+                              {passMeta ? (
+                                <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
+                                  {passMeta.name}
+                                </span>
+                              ) : null}
+                            </div>
+                            {cleanLabel && (
+                              <div className="mt-1 text-sm leading-6 text-zinc-600">{cleanLabel}</div>
                             )}
                           </div>
                         </div>
@@ -1472,15 +1485,18 @@ export function ReservationAssistSection({
                 {ticketHolders.length === 0 ? (
                   <p className="text-sm text-zinc-500">No imported ticket holders yet.</p>
                 ) : (
-                  ticketHolders.map((member) => (
+                  ticketHolders.map((member) => {
+                    const cleanLabel = cleanDisplayLabel(member.passLabel || member.entitlementLabel);
+                    return (
                     <div key={member.id} className="rounded-[24px] border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
                       <div className="font-semibold text-zinc-900">{member.displayName}</div>
-                      <div className="mt-1 text-zinc-500">{member.passLabel || member.entitlementLabel}</div>
+                      <div className="mt-1 text-zinc-500">{cleanLabel}</div>
                       <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
                         Shown for party reference
                       </div>
                     </div>
-                  ))
+                  );
+                  })
                 )}
               </div>
             </div>
@@ -1497,13 +1513,13 @@ export function ReservationAssistSection({
               <p className="mt-3 text-sm leading-6 text-zinc-600">Add a watched date first, then choose the imported Disney members who should be targeted for that date.</p>
             ) : (
               <>
-                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(360px,1fr)_auto] lg:items-end">
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-zinc-700">Watched date</span>
                     <select
                       value={currentTarget?.id ?? ""}
                       onChange={(event) => setTargetWatchId(event.target.value)}
-                      className="w-full min-w-0 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
+                      className="w-full min-w-[320px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
                     >
                       {watchItems.map((item) => {
                         const passName = PASS_TYPES.find((pass) => pass.id === item.passType)?.name ?? item.passType;
@@ -1527,7 +1543,7 @@ export function ReservationAssistSection({
                       !currentTarget ? "cursor-not-allowed opacity-50" : ""
                     )}
                   >
-                    {targetAutoBookingEnabled ? "Auto booking on" : "Turn on auto booking"}
+                    {targetAutoBookingEnabled ? "Turn off auto booking" : "Turn on auto booking"}
                   </button>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-zinc-600">{watchTargetStatus.message}</p>
@@ -1539,11 +1555,12 @@ export function ReservationAssistSection({
                         Import the connected Disney party first so you can choose Magic Key targets for this watched date.
                       </div>
                     ) : (
-                      <div className="grid gap-3 xl:grid-cols-2">
+                      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
                         {magicKeyTargetRows.map(({ member, eligibility, selected }) => {
                           const disabled = !eligibility.eligible && !selected;
                           const passMeta = passMetaForMember(member);
                           const nextLabel = eligibilityLabel(eligibility.status);
+                          const cleanLabel = cleanDisplayLabel(member.passLabel);
                           return (
                             <label
                               key={member.id}
@@ -1573,13 +1590,20 @@ export function ReservationAssistSection({
                               <span className="min-w-0 flex-1">
                                 <span className="flex items-center gap-3">
                                   {passMeta ? (
-                                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] bg-gradient-to-br from-violet-100 via-fuchsia-50 to-white ring-1 ring-violet-100">
-                                      <PassIcon passType={passMeta.id} size="h-8 w-8" />
+                                    <span className={classNames("flex h-16 w-16 shrink-0 items-center justify-center rounded-[22px] bg-gradient-to-br to-white ring-1 ring-violet-100", passMeta.accent, "from-white/70")}>
+                                      <PassIcon passType={passMeta.id} size="h-9 w-9" />
                                     </span>
                                   ) : null}
-                                  <span className="min-w-0">
-                                    <span className="block text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</span>
-                                    <span className="mt-1 block text-sm font-medium text-zinc-600">{member.passLabel}</span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="flex flex-wrap items-center gap-2">
+                                      <span className="block text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</span>
+                                      {passMeta ? (
+                                        <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
+                                          {passMeta.name}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                    <span className="mt-1 block text-sm leading-6 text-zinc-600">{cleanLabel}</span>
                                   </span>
                                 </span>
                                 <span
