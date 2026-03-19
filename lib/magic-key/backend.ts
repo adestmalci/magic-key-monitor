@@ -3153,6 +3153,22 @@ export async function completePlannerHubJob(
   };
 
   await writeBackendState(state);
+
+  return {
+    userId: job.userId,
+    jobType: job.type,
+    status: effectiveStatus,
+    ok: effectiveOk,
+    targetWatchDate: job.targetWatchDate || "",
+    resultMessage:
+      job.type === "booking"
+        ? preferences.plannerHubBooking.lastResultMessage
+        : effectiveNote || effectiveFailureReason || effectiveRequiredActionMessage || job.lastMessage,
+    requiredActionMessage:
+      job.type === "booking"
+        ? preferences.plannerHubBooking.lastRequiredActionMessage
+        : effectiveRequiredActionMessage,
+  };
 }
 
 export async function getPlannerHubDiagnosticsForUser(userId: string) {

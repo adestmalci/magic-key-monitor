@@ -12,6 +12,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
+import { PassIcon } from "./icons";
 import { PASS_TYPES } from "../../lib/magic-key/config";
 import type {
   DisneyWorkerJob,
@@ -213,6 +214,53 @@ function summarizeEligibility(member: ImportedDisneyMember, item: WatchItem, loo
     eligible: status !== "blocked",
     status,
   };
+}
+
+function eligibilityLabel(status: WatchItem["currentStatus"]) {
+  if (status === "blocked") return "Blocked out for this date";
+  if (status === "unavailable") return "No reservation available yet";
+  if (status === "either") return "Eligible for either park";
+  if (status === "dl") return "Eligible for Disneyland Park";
+  return "Eligible for Disney California Adventure";
+}
+
+function eligibilityTone(status: WatchItem["currentStatus"]) {
+  if (status === "blocked") {
+    return "border-slate-200 bg-slate-100 text-slate-700";
+  }
+  if (status === "unavailable") {
+    return "border-amber-200 bg-amber-50 text-amber-900";
+  }
+  return "border-emerald-200 bg-emerald-50 text-emerald-900";
+}
+
+function summarizeUnavailableSelection(rows: Array<{ member: ImportedDisneyMember; eligibility: ReturnType<typeof summarizeEligibility> }>) {
+  const blocked = rows.filter((row) => row.eligibility.status === "blocked");
+  const unavailable = rows.filter((row) => row.eligibility.status === "unavailable");
+
+  if (blocked.length > 0 && unavailable.length === 0) {
+    return {
+      label: "Blocked out",
+      message: `${blocked.map((row) => row.member.displayName).join(", ")} ${blocked.length === 1 ? "is" : "are"} blocked out for this watched date.`,
+    };
+  }
+
+  if (unavailable.length > 0 && blocked.length === 0) {
+    return {
+      label: "No reservation yet",
+      message: `${unavailable.map((row) => row.member.displayName).join(", ")} ${unavailable.length === 1 ? "does" : "do"} not have a reservation opening yet for this watched date.`,
+    };
+  }
+
+  return {
+    label: "Selection unavailable",
+    message: "The selected Magic Key targets are not all usable for this watched date yet.",
+  };
+}
+
+function passMetaForMember(member: ImportedDisneyMember) {
+  if (!member.magicKeyPassType) return null;
+  return PASS_TYPES.find((pass) => pass.id === member.magicKeyPassType) ?? null;
 }
 
 export function ReservationAssistSection({
@@ -483,13 +531,13 @@ export function ReservationAssistSection({
   const nextTimelineStep = connectionTimeline.find((step) => !step.complete) || null;
   const visibleTimeline =
     connectionTimeline.filter((step) => step.complete).concat(activeDisneyJob && nextTimelineStep ? [nextTimelineStep] : []);
-  const showPairingSection = !activeLocalDevice || Boolean(pairToken);
   const shouldShowDiagnostics =
     hasTerminalFailure ||
     activeDisneyJob ||
     Boolean(plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastClaimedJobId || plannerHubConnection.lastReportedJobId);
   const showExpandedTimeline = activeDisneyJob || hasTerminalFailure;
   const minimalConnectedState = effectiveConnectionStatus === "connected" && !activeDisneyJob && !hasTerminalFailure;
+  const showPairingSection = (!minimalConnectedState && !activeLocalDevice) || Boolean(pairToken);
   const importState = plannerHubConnection.lastImportStatus || (importJobActive ? "processing" : "");
   const importStatusLabel =
     importState === "queued"
@@ -567,6 +615,11 @@ export function ReservationAssistSection({
     importedDisneyMembers.length > 0 ? "Refresh connected party" : "Import connected members";
   const connectButtonLabel =
     effectiveConnectionStatus === "connected" ? "Reconnect Disney on active Mac" : "Connect Disney on active Mac";
+  const visibleDeviceLabel = activeLocalDevice
+    ? `${activeLocalDevice.deviceName} • last seen ${formatSyncTime(activeLocalDevice.lastSeenAt || activeLocalDevice.lastCheckInAt)}`
+    : plannerHubConnection.activeDeviceName
+      ? `${plannerHubConnection.activeDeviceName} • local session ready`
+      : "";
 
   const bookingReadiness = useMemo(() => {
     if (!currentTarget) {
@@ -610,18 +663,22 @@ export function ReservationAssistSection({
     }
 
     if (selectedUnavailableRows.length > 0) {
+      const unavailableSummary = summarizeUnavailableSelection(selectedUnavailableRows);
       return {
-        label: "Waiting for this date to open",
+        label: unavailableSummary.label,
         tone: "border-amber-200 bg-amber-50 text-amber-900",
-        message: `${selectedUnavailableRows.map((row) => row.member.displayName).join(", ")} ${selectedUnavailableRows.length === 1 ? "is" : "are"} currently unavailable for this watched date.`,
+        message: unavailableSummary.message,
       };
     }
 
     if (selectedEligibleRows.length === 0) {
       return {
-        label: "Waiting for this date to open",
+        label: currentTarget.currentStatus === "blocked" ? "Blocked out" : "No reservation yet",
         tone: "border-amber-200 bg-amber-50 text-amber-900",
-        message: "This watched date is not currently reservable for the selected Magic Key member targets.",
+        message:
+          currentTarget.currentStatus === "blocked"
+            ? "This watched date is blocked out for the selected Magic Key targets."
+            : "This watched date does not have reservation availability for the selected Magic Key targets yet.",
       };
     }
 
@@ -814,11 +871,9 @@ export function ReservationAssistSection({
 
           {minimalConnectedState ? (
             <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold">
-              <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
-                {activeLocalDevice
-                  ? `${activeLocalDevice.deviceName} • last seen ${formatSyncTime(activeLocalDevice.lastSeenAt || activeLocalDevice.lastCheckInAt)}`
-                  : "No active local device"}
-              </span>
+              {visibleDeviceLabel && (
+                <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">{visibleDeviceLabel}</span>
+              )}
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-800">
                 {plannerHubConnection.hasLocalSession ? "Local Disney session ready" : "No local Disney session"}
               </span>
@@ -1122,6 +1177,14 @@ export function ReservationAssistSection({
                     {isRefreshing ? "Refreshing..." : "Refresh status"}
                   </button>
                 </div>
+                <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
+                  <div className="flex items-start gap-3">
+                    <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
+                    <span>
+                      Disney passwords are only used for the one-time worker handoff. The app keeps encrypted session state, not the password itself. If Disney expires the session or asks for a one-time code later, booking pauses and asks you to reconnect.
+                    </span>
+                  </div>
+                </div>
               </div>
             </details>
           ) : (
@@ -1351,17 +1414,29 @@ export function ReservationAssistSection({
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
               <div className="text-sm font-semibold text-zinc-900">Magic Key members</div>
-              <div className="mt-3 space-y-3">
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {magicKeyMembers.length === 0 ? (
                   <p className="text-sm text-zinc-500">No imported Magic Key members yet.</p>
                 ) : (
-                  magicKeyMembers.map((member) => (
-                    <div key={member.id} className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
-                      <div className="font-semibold text-zinc-900">{member.displayName}</div>
-                      <div className="mt-1 text-zinc-500">{member.passLabel || member.entitlementLabel}</div>
-                      {member.rawEligibilityText && <div className="mt-1 text-zinc-500">{member.rawEligibilityText}</div>}
-                    </div>
-                  ))
+                  magicKeyMembers.map((member) => {
+                    const passMeta = passMetaForMember(member);
+                    return (
+                      <div key={member.id} className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
+                        <div className="flex items-start gap-3">
+                          {passMeta ? (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-50">
+                              <PassIcon passType={passMeta.id} size="h-6 w-6" />
+                            </div>
+                          ) : null}
+                          <div className="min-w-0">
+                            <div className="font-semibold text-zinc-900">{member.displayName}</div>
+                            <div className="mt-1 text-zinc-500">{member.passLabel || member.entitlementLabel}</div>
+                            {member.rawEligibilityText && <div className="mt-1 text-zinc-500">{member.rawEligibilityText}</div>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -1387,7 +1462,12 @@ export function ReservationAssistSection({
           </div>
 
           <div className="mt-6 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4">
-            <div className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Watch target</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Watch target</div>
+              <div className={classNames("rounded-full border px-3 py-1 text-xs font-semibold", bookingReadiness.tone)}>
+                {bookingReadiness.label}
+              </div>
+            </div>
             {watchItems.length === 0 ? (
               <p className="mt-3 text-sm leading-6 text-zinc-600">Add a watched date first, then choose the imported Disney members who should be targeted for that date.</p>
             ) : (
@@ -1420,6 +1500,7 @@ export function ReservationAssistSection({
                     <span>Enable auto booking attempts</span>
                   </label>
                 </div>
+                <p className="mt-3 text-sm leading-6 text-zinc-600">{bookingReadiness.message}</p>
 
                 {currentTarget && (
                   <div className="mt-4 space-y-4">
@@ -1435,22 +1516,16 @@ export function ReservationAssistSection({
                         Import the connected Disney party first so you can choose Magic Key targets for this watched date.
                       </div>
                     ) : (
-                      <div className="grid gap-3">
+                      <div className="grid gap-3 md:grid-cols-2">
                         {magicKeyTargetRows.map(({ member, eligibility, selected }) => {
                           const disabled = !eligibility.eligible && !selected;
-                          const nextLabel =
-                            eligibility.status === "either"
-                              ? "Eligible for either park"
-                              : eligibility.status === "dl"
-                                ? "Eligible for Disneyland Park"
-                                : eligibility.status === "dca"
-                                  ? "Eligible for Disney California Adventure"
-                                  : "Waiting for this date to open";
+                          const passMeta = passMetaForMember(member);
+                          const nextLabel = eligibilityLabel(eligibility.status);
                           return (
                             <label
                               key={member.id}
                               className={classNames(
-                                "flex items-start gap-3 rounded-2xl border bg-white px-4 py-4 text-sm",
+                                "flex items-start gap-3 rounded-2xl border bg-white px-4 py-4 text-sm shadow-sm transition",
                                 selected
                                   ? "border-violet-200 bg-violet-50/60 text-zinc-800"
                                   : "border-zinc-200 text-zinc-700",
@@ -1472,13 +1547,24 @@ export function ReservationAssistSection({
                                 }}
                                 className="mt-1 h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
                               />
-                              <span>
-                                <span className="block font-semibold text-zinc-900">{member.displayName}</span>
-                                <span className="mt-1 block text-zinc-500">{member.passLabel}</span>
-                                <span className={classNames(
-                                  "mt-1 block",
-                                  eligibility.eligible ? "text-emerald-700" : "text-amber-700"
-                                )}>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-start gap-3">
+                                  {passMeta ? (
+                                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-50">
+                                      <PassIcon passType={passMeta.id} size="h-6 w-6" />
+                                    </span>
+                                  ) : null}
+                                  <span className="min-w-0">
+                                    <span className="block font-semibold text-zinc-900">{member.displayName}</span>
+                                    <span className="mt-1 block text-zinc-500">{member.passLabel}</span>
+                                  </span>
+                                </span>
+                                <span
+                                  className={classNames(
+                                    "mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
+                                    eligibilityTone(eligibility.status)
+                                  )}
+                                >
                                   {nextLabel}
                                 </span>
                               </span>
@@ -1545,24 +1631,7 @@ export function ReservationAssistSection({
                 <p className="mt-2 leading-6">{plannerHubBooking.lastRequiredActionMessage || "No action required yet."}</p>
               </div>
             </div>
-          ) : (
-            <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-              <div className="font-semibold text-zinc-900">Booking readiness</div>
-              <div className={classNames("mt-3 rounded-2xl border px-4 py-4", bookingReadiness.tone)}>
-                <div className="font-semibold">{bookingReadiness.label}</div>
-                <p className="mt-2 leading-6">{bookingReadiness.message}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-            <div className="flex items-start gap-3">
-              <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
-              <span>
-                Disney passwords are only used for the one-time worker handoff. The app keeps encrypted session state, not the password itself. If Disney expires the session or asks for a one-time code later, booking pauses and asks you to reconnect.
-              </span>
-            </div>
-          </div>
+          ) : null}
         </section>
       </div>
     </section>

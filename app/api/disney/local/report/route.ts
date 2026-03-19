@@ -1,4 +1,5 @@
-import { completePlannerHubJob, getUserIdFromLocalWorkerRequest } from "../../../../../lib/magic-key/backend";
+import { completePlannerHubJob, getUserIdFromLocalWorkerRequest, readBackendState } from "../../../../../lib/magic-key/backend";
+import { sendPlannerHubBookingStatusEmailForUser } from "../../../../../lib/magic-key/notifications";
 
 export async function POST(request: Request) {
   const userId = getUserIdFromLocalWorkerRequest(request);
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Missing planner-hub job id." }, { status: 400 });
   }
 
-  await completePlannerHubJob(jobId, {
+  const result = await completePlannerHubJob(jobId, {
     ok: Boolean(body?.ok),
     status: body?.status,
     importedDisneyMembers: Array.isArray(body?.importedDisneyMembers) ? body.importedDisneyMembers : undefined,
@@ -26,6 +27,26 @@ export async function POST(request: Request) {
     deviceId: typeof body?.deviceId === "string" ? body.deviceId : "",
     hasLocalSession: typeof body?.hasLocalSession === "boolean" ? body.hasLocalSession : undefined,
   });
+
+  if (
+    result.jobType === "booking" &&
+    result.targetWatchDate &&
+    (result.status === "paused_login" || result.status === "paused_mismatch" || result.status === "failed")
+  ) {
+    const state = await readBackendState();
+    await sendPlannerHubBookingStatusEmailForUser(state, result.userId, {
+      watchDate: result.targetWatchDate,
+      status: result.status,
+      summary: result.resultMessage || "The latest Disney booking attempt needs attention.",
+      nextStep:
+        result.requiredActionMessage ||
+        (result.status === "paused_mismatch"
+          ? "Refresh the connected party and reselect the Magic Key targets before the next attempt."
+          : result.status === "paused_login"
+            ? "Reconnect Disney on your Mac before the next attempt."
+            : "Open Reserve to review the latest booking result."),
+    });
+  }
 
   return Response.json({ ok: true });
 }

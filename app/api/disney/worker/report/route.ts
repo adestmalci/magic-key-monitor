@@ -1,4 +1,5 @@
-import { completePlannerHubJob, isAuthorizedWorkerRequest } from "../../../../../lib/magic-key/backend";
+import { completePlannerHubJob, isAuthorizedWorkerRequest, readBackendState } from "../../../../../lib/magic-key/backend";
+import { sendPlannerHubBookingStatusEmailForUser } from "../../../../../lib/magic-key/notifications";
 
 export async function POST(request: Request) {
   if (!isAuthorizedWorkerRequest(request)) {
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await completePlannerHubJob(jobId, {
+    const result = await completePlannerHubJob(jobId, {
       ok: Boolean(body?.ok),
       status: body?.status,
       importedDisneyMembers: Array.isArray(body?.importedDisneyMembers) ? body.importedDisneyMembers : undefined,
@@ -26,6 +27,26 @@ export async function POST(request: Request) {
       note: typeof body?.note === "string" ? body.note : "",
       reportedBy: typeof body?.reportedBy === "string" ? body.reportedBy : "",
     });
+
+    if (
+      result.jobType === "booking" &&
+      result.targetWatchDate &&
+      (result.status === "paused_login" || result.status === "paused_mismatch" || result.status === "failed")
+    ) {
+      const state = await readBackendState();
+      await sendPlannerHubBookingStatusEmailForUser(state, result.userId, {
+        watchDate: result.targetWatchDate,
+        status: result.status,
+        summary: result.resultMessage || "The latest Disney booking attempt needs attention.",
+        nextStep:
+          result.requiredActionMessage ||
+          (result.status === "paused_mismatch"
+            ? "Refresh the connected party and reselect the Magic Key targets before the next attempt."
+            : result.status === "paused_login"
+              ? "Reconnect Disney on your Mac before the next attempt."
+              : "Open Reserve to review the latest booking result."),
+      });
+    }
     console.info("[disney-worker-report]", {
       jobId,
       ok: Boolean(body?.ok),

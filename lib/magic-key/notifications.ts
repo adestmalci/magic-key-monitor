@@ -46,6 +46,44 @@ function createEmailHtml(email: string, changes: AlertChange[]) {
   `;
 }
 
+function createBookingStatusEmailHtml(
+  email: string,
+  payload: {
+    watchDate: string;
+    status: "booked" | "paused_login" | "paused_mismatch" | "failed";
+    summary: string;
+    nextStep: string;
+  }
+) {
+  const title =
+    payload.status === "booked"
+      ? "A Disney reservation attempt succeeded"
+      : payload.status === "paused_login"
+        ? "A Disney reservation attempt needs login attention"
+        : payload.status === "paused_mismatch"
+          ? "A Disney reservation attempt paused because the party changed"
+          : "A Disney reservation attempt failed";
+
+  return `
+    <div style="background:#f5f3ff;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
+      <div style="max-width:620px;margin:0 auto;background:white;border-radius:28px;padding:28px;border:1px solid #e9d5ff;">
+        <div style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#ec4899,#38bdf8);color:white;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">
+          Magic Key Monitor
+        </div>
+        <h1 style="margin:18px 0 10px;font-size:28px;line-height:1.2;">${title}</h1>
+        <p style="margin:0 0 20px;color:#52525b;font-size:15px;">
+          ${email}, here is the latest booking update for ${formatWatchDate(payload.watchDate)}.
+        </p>
+        <div style="border:1px solid #e4e4e7;border-radius:20px;padding:16px;background:#fafafa;">
+          <div style="font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#71717a;">Latest booking status</div>
+          <div style="margin-top:8px;font-size:20px;font-weight:700;color:#18181b;">${payload.summary}</div>
+          <div style="margin-top:12px;font-size:14px;color:#3f3f46;">${payload.nextStep}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function createPushPayload(changes: AlertChange[]) {
   const first = changes[0];
   const pass = PASS_TYPES.find((row) => row.id === first.item.passType)?.short ?? first.item.passType;
@@ -239,4 +277,38 @@ export async function sendAlertsForChanges(
       await sendPushToUser(state, userId, createPushPayload(changes));
     }
   }
+}
+
+export async function sendPlannerHubBookingStatusEmailForUser(
+  state: Awaited<ReturnType<typeof import("./backend").readBackendState>>,
+  userId: string,
+  payload: {
+    watchDate: string;
+    status: "booked" | "paused_login" | "paused_mismatch" | "failed";
+    summary: string;
+    nextStep: string;
+  }
+) {
+  const user = getUserFromState(state, userId);
+  if (!user) {
+    return { ok: false as const, message: "We couldn't find that signed-in account." };
+  }
+
+  const preferences = getPreferencesFromState(state, userId);
+  const emailTarget = preferences.emailAddress || user.email;
+
+  if (!preferences.emailEnabled || !emailTarget) {
+    return { ok: false as const, message: "Email alerts are disabled for this account." };
+  }
+
+  const subject =
+    payload.status === "booked"
+      ? `Disney booking confirmed for ${formatWatchDate(payload.watchDate)}`
+      : payload.status === "paused_login"
+        ? `Disney booking needs login attention for ${formatWatchDate(payload.watchDate)}`
+        : payload.status === "paused_mismatch"
+          ? `Disney party changed before booking ${formatWatchDate(payload.watchDate)}`
+          : `Disney booking failed for ${formatWatchDate(payload.watchDate)}`;
+
+  return sendEmail(emailTarget, subject, createBookingStatusEmailHtml(emailTarget, payload));
 }
