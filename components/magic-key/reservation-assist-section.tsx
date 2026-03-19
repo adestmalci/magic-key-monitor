@@ -34,7 +34,8 @@ type ReservationAssistSectionProps = {
   reservationAssist: ReservationAssistState;
   plannerHubBooking: PlannerHubBookingState;
   plannerHubConnection: PlannerHubConnectionState;
-  latestDisneyJob: DisneyWorkerJob | null;
+  latestConnectJob: DisneyWorkerJob | null;
+  latestImportJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
   localWorkerDevices: LocalWorkerDevice[];
   syncMeta: SyncMeta;
@@ -50,7 +51,7 @@ type ReservationAssistSectionProps = {
   ) => void;
   onConnectDisney: (disneyEmail: string, password: string) => Promise<boolean | string> | boolean | string;
   onCreateLocalWorkerPairToken: (deviceName: string) => Promise<string> | string;
-  onImportConnectedMembers: () => Promise<boolean> | boolean;
+  onImportConnectedMembers: () => Promise<boolean | string> | boolean | string;
   onResetDisneyConnection: () => Promise<boolean> | boolean;
   onRefreshState: () => Promise<void> | void;
   onRefreshDisneyStatus: () => Promise<void> | void;
@@ -164,27 +165,27 @@ const phaseLabels: Record<(typeof livePhaseOrder)[number], string> = {
 
 function deriveConnectionStatus(
   plannerHubConnection: PlannerHubConnectionState,
-  latestDisneyJob: DisneyWorkerJob | null
+  latestConnectJob: DisneyWorkerJob | null
 ): PlannerHubConnectionState["status"] {
-  if (!latestDisneyJob) {
+  if (!latestConnectJob) {
     return plannerHubConnection.status;
   }
 
-  if (latestDisneyJob.status === "processing") {
-    return latestDisneyJob.type === "import" ? "importing" : "pending_connect";
+  if (latestConnectJob.status === "processing") {
+    return "pending_connect";
   }
 
-  if (latestDisneyJob.status === "queued") {
-    return latestDisneyJob.type === "import" ? "importing" : "pending_connect";
+  if (latestConnectJob.status === "queued") {
+    return "pending_connect";
   }
 
-  if (latestDisneyJob.status === "failed") {
-    if (latestDisneyJob.phase === "paused_login") return "paused_login";
-    if (latestDisneyJob.phase === "paused_mismatch") return "paused_mismatch";
+  if (latestConnectJob.status === "failed") {
+    if (latestConnectJob.phase === "paused_login") return "paused_login";
+    if (latestConnectJob.phase === "paused_mismatch") return "paused_mismatch";
     return "failed";
   }
 
-  if (latestDisneyJob.status === "completed") {
+  if (latestConnectJob.status === "completed") {
     return plannerHubConnection.hasEncryptedSession || plannerHubConnection.hasLocalSession
       ? "connected"
       : plannerHubConnection.status;
@@ -217,7 +218,8 @@ export function ReservationAssistSection({
   reservationAssist,
   plannerHubBooking,
   plannerHubConnection,
-  latestDisneyJob,
+  latestConnectJob,
+  latestImportJob,
   importedDisneyMembers,
   localWorkerDevices,
   syncMeta,
@@ -247,9 +249,11 @@ export function ReservationAssistSection({
   const [pairDeviceName, setPairDeviceName] = useState("My Mac");
   const [pairToken, setPairToken] = useState("");
   const [isCreatingPairToken, setIsCreatingPairToken] = useState(false);
+  const connectJobActive = latestConnectJob?.status === "queued" || latestConnectJob?.status === "processing";
+  const importJobActive = latestImportJob?.status === "queued" || latestImportJob?.status === "processing";
 
   useEffect(() => {
-    if (plannerHubConnection.status !== "pending_connect" && plannerHubConnection.status !== "importing") {
+    if (!connectJobActive && !importJobActive) {
       return;
     }
 
@@ -258,7 +262,7 @@ export function ReservationAssistSection({
     }, 2_500);
 
     return () => window.clearInterval(timer);
-  }, [onRefreshDisneyStatus, plannerHubConnection.status]);
+  }, [connectJobActive, importJobActive, onRefreshDisneyStatus]);
 
   const activeLocalDevice =
     localWorkerDevices.find((device) => device.id === plannerHubConnection.activeDeviceId) ||
@@ -386,17 +390,16 @@ export function ReservationAssistSection({
     reservationAssist.confirmProofCaptured,
   ].filter(Boolean).length;
   const showCheckpoint = reservationAssist.sessionStatus === "checking";
-  const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestDisneyJob);
+  const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestConnectJob);
   const currentConnectionMeta = connectionTone[effectiveConnectionStatus];
   const currentBookingMeta = bookingMeta[plannerHubBooking.status];
-  const activeDisneyJob =
-    effectiveConnectionStatus === "pending_connect" || effectiveConnectionStatus === "importing";
+  const activeDisneyJob = connectJobActive;
   const hasTerminalFailure =
     effectiveConnectionStatus === "failed" ||
     effectiveConnectionStatus === "paused_login" ||
     effectiveConnectionStatus === "paused_mismatch";
   const connectionTimeline = livePhaseOrder.map((phase) => {
-    const event = latestDisneyJob?.events.find((entry) => entry.phase === phase);
+    const event = latestConnectJob?.events.find((entry) => entry.phase === phase);
     return {
       phase,
       label: phaseLabels[phase],
@@ -406,32 +409,32 @@ export function ReservationAssistSection({
     };
   });
   const failureEvent =
-    latestDisneyJob?.events.find((entry) => entry.phase === "paused_login") ||
-    latestDisneyJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
-    latestDisneyJob?.events.find((entry) => entry.phase === "failed") ||
+    latestConnectJob?.events.find((entry) => entry.phase === "paused_login") ||
+    latestConnectJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
+    latestConnectJob?.events.find((entry) => entry.phase === "failed") ||
     null;
   const latestFailureMessage =
-    latestDisneyJob?.lastError ||
-    latestDisneyJob?.lastMessage ||
+    latestConnectJob?.lastError ||
+    latestConnectJob?.lastMessage ||
     plannerHubConnection.lastAuthFailureReason ||
     plannerHubConnection.lastRequiredActionMessage ||
     "";
   const latestWorkerMessage =
-    latestDisneyJob?.lastMessage ||
+    latestConnectJob?.lastMessage ||
     plannerHubConnection.lastRequiredActionMessage ||
     (plannerHubConnection.hasLocalSession
       ? "The active Mac has a device-local Disney session ready for connect attempts."
       : "Pair a local Mac and sign into Disney there before you try to connect.");
   const claimedJobValue =
     plannerHubConnection.lastClaimedJobId ||
-    (latestDisneyJob?.startedAt ? latestDisneyJob.id : "") ||
+    (latestConnectJob?.startedAt ? latestConnectJob.id : "") ||
     "No claim recorded yet";
   const reportedJobValue =
     plannerHubConnection.lastReportedJobId ||
-    (latestDisneyJob?.finishedAt ? latestDisneyJob.id : "") ||
+    (latestConnectJob?.finishedAt ? latestConnectJob.id : "") ||
     "No report recorded yet";
   const correlationRows = [
-    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || latestDisneyJob?.id || "None yet" },
+    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || latestConnectJob?.id || "None yet" },
     { label: "Claimed job", value: claimedJobValue },
     { label: "Reported job", value: reportedJobValue },
     {
@@ -453,6 +456,42 @@ export function ReservationAssistSection({
     Boolean(plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastClaimedJobId || plannerHubConnection.lastReportedJobId);
   const showExpandedTimeline = activeDisneyJob || hasTerminalFailure;
   const minimalConnectedState = effectiveConnectionStatus === "connected" && !activeDisneyJob && !hasTerminalFailure;
+  const importState = plannerHubConnection.lastImportStatus || (importJobActive ? "processing" : "");
+  const importStatusLabel =
+    importState === "queued"
+      ? "Import queued"
+      : importState === "processing"
+        ? "Import running"
+        : importState === "completed"
+          ? "Import finished"
+          : importState === "failed"
+            ? "Import failed"
+            : plannerHubConnection.lastImportJobId
+              ? "Last import"
+              : "No import yet";
+  const importStatusTone =
+    importState === "completed"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : importState === "failed"
+        ? "border-rose-200 bg-rose-50 text-rose-900"
+        : importState === "queued" || importState === "processing"
+          ? "border-sky-200 bg-sky-50 text-sky-900"
+          : "border-zinc-200 bg-zinc-50 text-zinc-700";
+  const importSummaryMessage =
+    importState === "queued"
+      ? plannerHubConnection.lastImportMessage || "The import job is queued and waiting for your Mac."
+      : importState === "processing"
+        ? plannerHubConnection.lastImportMessage || "The local worker is refreshing the connected Disney party."
+        : importState === "completed"
+          ? plannerHubConnection.lastImportedMemberCount > 0
+            ? `Imported ${plannerHubConnection.lastImportedMemberCount} connected Disney ${plannerHubConnection.lastImportedMemberCount === 1 ? "member" : "members"}.`
+            : plannerHubConnection.lastImportMessage || "Import finished with zero accepted members."
+          : plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "No import attempt has finished yet.";
+  const importDiagnostics = latestImportJob?.diagnostics;
+  const shouldShowImportDiagnostics =
+    importJobActive ||
+    importState === "failed" ||
+    (importState === "completed" && plannerHubConnection.lastImportedMemberCount === 0 && Boolean(plannerHubConnection.lastImportJobId));
   const summarizedActionMessage =
     plannerHubConnection.lastRequiredActionMessage &&
     plannerHubConnection.lastRequiredActionMessage !== latestWorkerMessage &&
@@ -560,7 +599,16 @@ export function ReservationAssistSection({
   async function handleImport() {
     setIsImporting(true);
     try {
-      await onImportConnectedMembers();
+      const queued = await onImportConnectedMembers();
+      if (queued) {
+        onPlannerHubConnectionChange({
+          lastImportJobId: typeof queued === "string" ? queued : plannerHubConnection.lastImportJobId,
+          lastImportQueuedAt: new Date().toISOString(),
+          lastImportStatus: "queued",
+          lastImportMessage: "Disney member import queued and waiting for your Mac.",
+          lastImportError: "",
+        });
+      }
     } finally {
       setIsImporting(false);
     }
@@ -656,6 +704,71 @@ export function ReservationAssistSection({
               </div>
             </div>
           )}
+
+          <div className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${importStatusTone}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-semibold">Import status</div>
+              <div className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold">
+                {importStatusLabel}
+              </div>
+            </div>
+            <p className="mt-2 leading-6">{importSummaryMessage}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+              <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
+                {plannerHubConnection.lastImportFinishedAt
+                  ? `Last import ${formatSyncTime(plannerHubConnection.lastImportFinishedAt)}`
+                  : plannerHubConnection.lastImportQueuedAt
+                    ? `Queued ${formatSyncTime(plannerHubConnection.lastImportQueuedAt)}`
+                    : "No import queued yet"}
+              </span>
+              <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
+                {plannerHubConnection.lastImportedMemberCount} accepted member{plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"}
+              </span>
+            </div>
+            {shouldShowImportDiagnostics && (
+              <details className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-zinc-700">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-900">Import diagnostics</summary>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Import job</div>
+                    <div className="mt-1 break-all text-sm font-medium text-zinc-900">
+                      {plannerHubConnection.lastImportJobId || "No import job recorded yet"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Last import result</div>
+                    <div className="mt-1 text-sm font-medium text-zinc-900">
+                      {plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "No import result recorded yet"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Rows seen</div>
+                    <div className="mt-1 text-sm font-medium text-zinc-900">
+                      {importDiagnostics ? importDiagnostics.extractedRowCount : "No diagnostics recorded yet"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Accepted vs rejected</div>
+                    <div className="mt-1 text-sm font-medium text-zinc-900">
+                      {importDiagnostics
+                        ? `${importDiagnostics.acceptedMemberCount} accepted • ${importDiagnostics.rejectedMemberCount} rejected`
+                        : "No diagnostics recorded yet"}
+                    </div>
+                  </div>
+                </div>
+                {importDiagnostics?.pageUrl && (
+                  <p className="mt-3 break-all text-xs leading-5 text-zinc-500">{importDiagnostics.pageUrl}</p>
+                )}
+                {importDiagnostics?.rejectionReasons?.length ? (
+                  <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5 text-zinc-600">
+                    {importDiagnostics.rejectionReasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </details>
+            )}
+          </div>
 
           {(!minimalConnectedState || showExpandedTimeline) && (
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
@@ -882,7 +995,7 @@ export function ReservationAssistSection({
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
                   <div className="font-semibold text-zinc-900">Action needed</div>
                   <p className="mt-2 leading-6">{summarizedActionMessage}</p>
-                  {effectiveConnectionStatus === "pending_connect" && !latestDisneyJob?.startedAt && (
+                  {effectiveConnectionStatus === "pending_connect" && !latestConnectJob?.startedAt && (
                     <p className="mt-2 leading-6 text-zinc-500">
                       The Disney worker service has not started this planner-hub job yet. If this stays queued, check the dedicated worker service rather than the background scheduler.
                     </p>

@@ -2,7 +2,7 @@ import { homedir, hostname } from "node:os";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
-import { extractConnectedMembersFromPage, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
+import { inspectConnectedMembersFromPage, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
 
 const DEFAULT_APP_URL = (process.env.MAGIC_KEY_APP_URL || "").replace(/\/$/, "");
 const DEFAULT_LOCAL_WORKER_TOKEN = process.env.MAGIC_KEY_LOCAL_WORKER_TOKEN || "";
@@ -324,21 +324,29 @@ async function scrapeConnectedMembers(page, progress) {
     };
   }
 
-  const members = await extractConnectedMembersFromPage(page);
-  const validMembers = members.filter((member) => member && member.displayName && member.passLabel);
+  const inspection = await inspectConnectedMembersFromPage(page);
+  const validMembers = inspection.extractedMembers.filter((member) => member && member.displayName && member.passLabel);
+  const diagnostics = {
+    extractedRowCount: inspection.extractedRowCount,
+    acceptedMemberCount: validMembers.length,
+    rejectedMemberCount: inspection.rejectedRows.length,
+    rejectionReasons: inspection.rejectedRows.map((row) => row.reason),
+    pageUrl: inspection.pageUrl,
+  };
 
   if (!validMembers.length) {
     return {
       ok: false,
       status: "paused_mismatch",
       reason: "Disney opened, but no connected party members were found on the select-party page.",
+      diagnostics,
     };
   }
 
   const importedDisneyMembers = toImportedDisneyMembers(validMembers, "primary");
 
   await progress("members_imported", `Imported ${importedDisneyMembers.length} connected Disney members.`);
-  return { ok: true, importedDisneyMembers };
+  return { ok: true, importedDisneyMembers, diagnostics };
 }
 
 async function createLocalContext(profileDir, headless = false) {

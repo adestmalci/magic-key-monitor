@@ -96,6 +96,8 @@ export default function Home() {
   const [plannerHubBooking, setPlannerHubBooking] = useState<PlannerHubBookingState>(createDefaultPlannerHubBooking());
   const [plannerHubConnection, setPlannerHubConnection] = useState<PlannerHubConnectionState>(createDefaultPlannerHubConnection());
   const [latestDisneyJob, setLatestDisneyJob] = useState<DisneyWorkerJob | null>(null);
+  const [latestConnectJob, setLatestConnectJob] = useState<DisneyWorkerJob | null>(null);
+  const [latestImportJob, setLatestImportJob] = useState<DisneyWorkerJob | null>(null);
   const [importedDisneyMembers, setImportedDisneyMembers] = useState<ImportedDisneyMember[]>([]);
   const [localWorkerDevices, setLocalWorkerDevices] = useState<LocalWorkerDevice[]>([]);
   const [authEmail, setAuthEmail] = useState("");
@@ -193,6 +195,8 @@ export default function Home() {
     setPlannerHubBooking(data.plannerHubBooking || createDefaultPlannerHubBooking());
     setPlannerHubConnection(data.plannerHubConnection || createDefaultPlannerHubConnection(data.user?.email || ""));
     setLatestDisneyJob(data.latestDisneyJob || null);
+    setLatestConnectJob(data.latestConnectJob || null);
+    setLatestImportJob(data.latestImportJob || null);
     setImportedDisneyMembers(Array.isArray(data.importedDisneyMembers) ? data.importedDisneyMembers : []);
     setLocalWorkerDevices(Array.isArray(data.localWorkerDevices) ? data.localWorkerDevices : []);
 
@@ -220,6 +224,8 @@ export default function Home() {
       setPlannerHubBooking(createDefaultPlannerHubBooking());
       setPlannerHubConnection(createDefaultPlannerHubConnection());
       setLatestDisneyJob(null);
+      setLatestConnectJob(null);
+      setLatestImportJob(null);
       setImportedDisneyMembers([]);
       setLocalWorkerDevices([]);
       setAccountSaveState("local");
@@ -976,29 +982,6 @@ export default function Home() {
     [loadDashboardState, pushToast, sessionUser]
   );
 
-  const importConnectedDisneyMembers = useCallback(async () => {
-    if (!sessionUser) {
-      pushToast("error", "Sign in first so the Disney member import can stay tied to your account.");
-      return false;
-    }
-
-    const response = await fetch("/api/disney/import", {
-      method: "POST",
-    });
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      pushToast("error", data.error || "We couldn't queue the Disney member import.");
-      return false;
-    }
-
-    setAccountSaveState("saved");
-    setAccountSaveMessage(`Disney import is queued for ${sessionUser.email}.`);
-    await loadDashboardState();
-    pushToast("success", "Disney member import queued.");
-    return true;
-  }, [loadDashboardState, pushToast, sessionUser]);
-
   const createLocalWorkerPairingToken = useCallback(
     async (deviceName: string) => {
       if (!sessionUser) {
@@ -1057,7 +1040,38 @@ export default function Home() {
       setLocalWorkerDevices(data.localWorkerDevices);
     }
     setLatestDisneyJob(data.latestDisneyJob || null);
+    setLatestConnectJob(data.latestConnectJob || null);
+    setLatestImportJob(data.latestImportJob || null);
   }, []);
+
+  const importConnectedDisneyMembers = useCallback(async () => {
+    if (!sessionUser) {
+      pushToast("error", "Sign in first so the Disney member import can stay tied to your account.");
+      return false;
+    }
+
+    const response = await fetch("/api/disney/import", {
+      method: "POST",
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      pushToast("error", data.error || "We couldn't queue the Disney member import.");
+      return false;
+    }
+
+    setAccountSaveState("saved");
+    setAccountSaveMessage(`Disney import is queued for ${sessionUser.email}.`);
+    await loadDashboardState();
+    await loadDisneyWorkerStatus();
+    pushToast(
+      "success",
+      data.jobId
+        ? `Disney import queued. Job ${String(data.jobId).slice(0, 8)} is waiting for your Mac.`
+        : "Disney member import queued."
+    );
+    return data.jobId || true;
+  }, [loadDashboardState, loadDisneyWorkerStatus, pushToast, sessionUser]);
 
   const resetDisneyPlannerHub = useCallback(async () => {
     if (!sessionUser) {
@@ -1340,7 +1354,8 @@ export default function Home() {
             reservationAssist={reservationAssist}
             plannerHubBooking={plannerHubBooking}
             plannerHubConnection={plannerHubConnection}
-            latestDisneyJob={latestDisneyJob}
+            latestConnectJob={latestConnectJob}
+            latestImportJob={latestImportJob}
             importedDisneyMembers={importedDisneyMembers}
             localWorkerDevices={localWorkerDevices}
             syncMeta={syncMeta}

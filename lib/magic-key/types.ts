@@ -150,6 +150,14 @@ export type PlannerHubConnectionState = {
   lastReportedJobId: string;
   lastWorkerResultAt: string;
   lastWorkerResultSource: string;
+  lastImportJobId: string;
+  lastImportQueuedAt: string;
+  lastImportStartedAt: string;
+  lastImportFinishedAt: string;
+  lastImportStatus: DisneyWorkerJobStatus | "failed" | "";
+  lastImportMessage: string;
+  lastImportError: string;
+  lastImportedMemberCount: number;
   hasEncryptedSession: boolean;
   hasLocalSession: boolean;
   importedMemberCount: number;
@@ -159,6 +167,14 @@ export type DisneyWorkerEvent = {
   phase: DisneyWorkerPhase;
   at: string;
   message: string;
+};
+
+export type DisneyWorkerJobDiagnostics = {
+  extractedRowCount: number;
+  acceptedMemberCount: number;
+  rejectedMemberCount: number;
+  rejectionReasons: string[];
+  pageUrl: string;
 };
 
 export type DisneyWorkerJob = {
@@ -177,6 +193,7 @@ export type DisneyWorkerJob = {
   reportedBy: string;
   attemptCount: number;
   events: DisneyWorkerEvent[];
+  diagnostics: DisneyWorkerJobDiagnostics | null;
 };
 
 export type LocalWorkerDevice = {
@@ -247,6 +264,8 @@ export type DashboardUserState = {
   plannerHubBooking: PlannerHubBookingState;
   plannerHubConnection: PlannerHubConnectionState;
   latestDisneyJob: DisneyWorkerJob | null;
+  latestConnectJob: DisneyWorkerJob | null;
+  latestImportJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
   localWorkerDevices: LocalWorkerDevice[];
   savedReservationParties: SavedReservationParty[];
@@ -311,6 +330,14 @@ export function createDefaultPlannerHubConnection(disneyEmail = ""): PlannerHubC
     lastReportedJobId: "",
     lastWorkerResultAt: "",
     lastWorkerResultSource: "",
+    lastImportJobId: "",
+    lastImportQueuedAt: "",
+    lastImportStartedAt: "",
+    lastImportFinishedAt: "",
+    lastImportStatus: "",
+    lastImportMessage: "",
+    lastImportError: "",
+    lastImportedMemberCount: 0,
     hasEncryptedSession: false,
     hasLocalSession: false,
     importedMemberCount: 0,

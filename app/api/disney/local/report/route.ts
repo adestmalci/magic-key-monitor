@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     ok: Boolean(body?.ok),
     status: body?.status,
     importedDisneyMembers: Array.isArray(body?.importedDisneyMembers) ? body.importedDisneyMembers : undefined,
+    diagnostics: body?.diagnostics ?? null,
     sessionState: body?.sessionState,
     encryptedSessionState: typeof body?.encryptedSessionState === "string" ? body.encryptedSessionState : undefined,
     lastAuthFailureReason: typeof body?.lastAuthFailureReason === "string" ? body.lastAuthFailureReason : "",

@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
-import { extractConnectedMembersFromPage, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
+import { inspectConnectedMembersFromPage, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
 
 const SELECT_PARTY_URL = "https://disneyland.disney.go.com/entry-reservation/add/select-party/";
 const PROFILE_URL = "https://disneyland.disney.go.com/profile/";
@@ -31,8 +31,8 @@ if (currentUrl.includes("/profile")) {
 
 const html = await page.content();
 const text = await page.locator("body").innerText();
-const extracted = await extractConnectedMembersFromPage(page);
-const imported = toImportedDisneyMembers(extracted);
+const inspection = await inspectConnectedMembersFromPage(page);
+const imported = toImportedDisneyMembers(inspection.extractedMembers);
 const shadowSnapshot = await page.evaluate(() => {
   const host = document.querySelector("tnp-reservations-spa");
   const root = host?.shadowRoot;
@@ -54,7 +54,15 @@ await writeFile(
     {
       url: currentUrl,
       shadowFound: shadowSnapshot.shadowFound,
-      extracted,
+      extracted: inspection.extractedMembers,
+      diagnostics: {
+        extractedRowCount: inspection.extractedRowCount,
+        acceptedMemberCount: inspection.extractedMembers.length,
+        rejectedMemberCount: inspection.rejectedRows.length,
+        rejectionReasons: inspection.rejectedRows.map((row) => row.reason),
+        pageUrl: inspection.pageUrl,
+      },
+      rejectedRows: inspection.rejectedRows,
       imported,
     },
     null,

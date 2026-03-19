@@ -32,45 +32,68 @@ function normalizeLines(lines) {
     .filter((line, index, list) => list.indexOf(line) === index);
 }
 
-export function extractConnectedMembersFromLines(rows) {
+function inspectConnectedMembersFromNormalizedRows(rows) {
   const seen = new Set();
-  return rows
-    .map((row, index) => {
-      const lines = normalizeLines(Array.isArray(row) ? row : []);
-      if (!lines.length) return null;
+  const extractedMembers = [];
+  const rejectedRows = [];
 
-      const displayName = lines.find((line) => looksLikeRealMemberName(line)) || "";
-      const ageLine = lines.find((line) => /^Age\s*/i.test(line) || /Guest/i.test(line)) || "";
-      const passLabel =
-        lines.find(
-          (line) =>
-            (/Magic Key|Ticket/i.test(line) || /Inspire|Believe|Enchant|Explore|Imagine/i.test(line)) &&
-            !/Reservation/i.test(line) &&
-            !/Footer Links|Visit Disney|Parks\s*&\s*Tickets|Related Disney Sites/i.test(line)
-        ) || "";
+  rows.forEach((row, index) => {
+    const lines = normalizeLines(Array.isArray(row) ? row : []);
+    if (!lines.length) {
+      rejectedRows.push({ index, reason: "empty_row", lines: [] });
+      return;
+    }
 
-      if (!displayName || !passLabel) return null;
+    const displayName = lines.find((line) => looksLikeRealMemberName(line)) || "";
+    const ageLine = lines.find((line) => /^Age\s*/i.test(line) || /Guest/i.test(line)) || "";
+    const passLabel =
+      lines.find(
+        (line) =>
+          (/Magic Key|Ticket/i.test(line) || /Inspire|Believe|Enchant|Explore|Imagine/i.test(line)) &&
+          !/Reservation/i.test(line) &&
+          !/Footer Links|Visit Disney|Parks\s*&\s*Tickets|Related Disney Sites/i.test(line)
+      ) || "";
 
-      const sourceGroup = parseSourceGroupFromPassLabel(passLabel);
-      const dedupeKey = `${sourceGroup}:${displayName.toLowerCase()}:${passLabel.toLowerCase()}`;
-      if (seen.has(dedupeKey)) return null;
-      seen.add(dedupeKey);
+    if (!displayName || !passLabel) {
+      rejectedRows.push({
+        index,
+        reason: !displayName ? "missing_name" : "missing_pass",
+        lines,
+      });
+      return;
+    }
 
-      return {
-        id: `member-${index}`,
-        displayName,
-        ageLine,
-        entitlementLabel: sourceGroup === "magic_key" ? "Magic Key Pass" : "Ticket holder",
-        rawSectionLabel: sourceGroup === "magic_key" ? "Magic Key Pass" : "Ticket holder",
-        passLabel,
-        rawEligibilityText: lines
-          .filter((line) => /Reservation/i.test(line) || /No-Shows?/i.test(line))
-          .join(" • "),
-        sourceGroup,
-        rawLines: lines,
-      };
-    })
-    .filter(Boolean);
+    const sourceGroup = parseSourceGroupFromPassLabel(passLabel);
+    const dedupeKey = `${sourceGroup}:${displayName.toLowerCase()}:${passLabel.toLowerCase()}`;
+    if (seen.has(dedupeKey)) {
+      rejectedRows.push({ index, reason: "duplicate", lines });
+      return;
+    }
+    seen.add(dedupeKey);
+
+    extractedMembers.push({
+      id: `member-${index}`,
+      displayName,
+      ageLine,
+      entitlementLabel: sourceGroup === "magic_key" ? "Magic Key Pass" : "Ticket holder",
+      rawSectionLabel: sourceGroup === "magic_key" ? "Magic Key Pass" : "Ticket holder",
+      passLabel,
+      rawEligibilityText: lines
+        .filter((line) => /Reservation/i.test(line) || /No-Shows?/i.test(line))
+        .join(" • "),
+      sourceGroup,
+      rawLines: lines,
+    });
+  });
+
+  return {
+    extractedMembers,
+    rejectedRows,
+  };
+}
+
+export function extractConnectedMembersFromLines(rows) {
+  return inspectConnectedMembersFromNormalizedRows(rows).extractedMembers;
 }
 
 export async function extractConnectedMembersFromPage(page) {
@@ -89,6 +112,30 @@ export async function extractConnectedMembersFromPage(page) {
   }
 
   return extractConnectedMembersFromLines(rows);
+}
+
+export async function inspectConnectedMembersFromPage(page) {
+  const rowLocator = page.locator(".sectionContainer");
+  const rowCount = await rowLocator.count();
+  const rows = [];
+
+  for (let index = 0; index < rowCount; index += 1) {
+    const text = await rowLocator.nth(index).innerText().catch(() => "");
+    rows.push(
+      text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+    );
+  }
+
+  const inspection = inspectConnectedMembersFromNormalizedRows(rows);
+  return {
+    pageUrl: page.url(),
+    extractedRowCount: rowCount,
+    extractedMembers: inspection.extractedMembers,
+    rejectedRows: inspection.rejectedRows,
+  };
 }
 
 export function toImportedDisneyMembers(extractedMembers, plannerHubId = "primary") {
