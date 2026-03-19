@@ -23,6 +23,10 @@ export async function GET(request: Request) {
     "X-Magic-Key-Stale": syncMeta.stale ? "1" : "0",
     "X-Magic-Key-Last-Attempted-Sync": syncMeta.lastAttemptedSyncAt || "",
     "X-Magic-Key-Last-Successful-Sync": syncMeta.lastSuccessfulSyncAt || "",
+    "X-Magic-Key-Last-Background-Run": syncMeta.lastBackgroundRunAt || "",
+    "X-Magic-Key-Last-Background-Message": syncMeta.lastBackgroundRunMessage || "",
+    "X-Magic-Key-Last-Worker-Poll": syncMeta.lastWorkerPollAt || "",
+    "X-Magic-Key-Last-Worker-Message": syncMeta.lastWorkerPollMessage || "",
     "X-Magic-Key-Status": syncMeta.message,
   });
 

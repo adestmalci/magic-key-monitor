@@ -157,19 +157,32 @@ export default function Home() {
 
   const prependActivity = useCallback(
     (source: SyncSource | "system", message: string, details?: string[], trigger?: string) => {
-    setActivity((current) =>
-      pruneActivityItems([
-        {
-          id: crypto.randomUUID(),
-          createdAt: new Date().toISOString(),
-          source,
-          trigger,
-          message,
-          details,
-        },
-        ...current,
-      ])
-    );
+      setActivity((current) =>
+        pruneActivityItems([
+          {
+            id: crypto.randomUUID(),
+            createdAt: new Date().toISOString(),
+            source,
+            trigger,
+            message,
+            details,
+          },
+          ...current,
+        ])
+      );
+    },
+    []
+  );
+
+  const persistActivityEntry = useCallback(
+    (entry: Pick<ActivityItem, "source" | "trigger" | "message" | "details">) => {
+      if (!sessionUserRef.current) return;
+
+      void fetch("/api/activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entry),
+      }).catch(() => undefined);
     },
     []
   );
@@ -514,6 +527,10 @@ export default function Home() {
           ...current,
           ...nextMeta,
           lastAttemptedSyncAt: new Date().toISOString(),
+          lastBackgroundRunAt: nextMeta.lastBackgroundRunAt || current.lastBackgroundRunAt,
+          lastBackgroundRunMessage: nextMeta.lastBackgroundRunMessage || current.lastBackgroundRunMessage,
+          lastWorkerPollAt: nextMeta.lastWorkerPollAt || current.lastWorkerPollAt,
+          lastWorkerPollMessage: nextMeta.lastWorkerPollMessage || current.lastWorkerPollMessage,
         }));
 
         setWatchItems((current) =>
@@ -564,19 +581,12 @@ export default function Home() {
 
         if (logActivity && source !== "startup") {
           prependActivity(source, summary, activityDetails, trigger);
-
-          if (sessionUserRef.current && source === "manual") {
-            void fetch("/api/activity", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                source,
-                trigger,
-                message: summary,
-                details: activityDetails,
-              }),
-            }).catch(() => undefined);
-          }
+          persistActivityEntry({
+            source,
+            trigger,
+            message: summary,
+            details: activityDetails,
+          });
         }
 
         if (alertsEnabledRef.current && changedItems.length > 0 && canNotify() && Notification.permission === "granted") {
@@ -598,19 +608,12 @@ export default function Home() {
 
         if (logActivity && source !== "startup") {
           prependActivity("system", message, [], trigger || "Sync request failed");
-
-          if (sessionUserRef.current && source === "manual") {
-            void fetch("/api/activity", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                source: "system",
-                trigger: trigger || "Sync request failed",
-                message,
-                details: [],
-              }),
-            }).catch(() => undefined);
-          }
+          persistActivityEntry({
+            source: "system",
+            trigger: trigger || "Sync request failed",
+            message,
+            details: [],
+          });
         }
 
         if (source === "manual") {
@@ -621,7 +624,7 @@ export default function Home() {
         setIsSyncing(false);
       }
     },
-    [importedDisneyMembers, prependActivity, pushToast]
+    [importedDisneyMembers, persistActivityEntry, prependActivity, pushToast]
   );
 
   useEffect(() => {
@@ -835,22 +838,16 @@ export default function Home() {
       [`Check frequency • ${nextFrequency}`]
     );
 
-    if (sessionUser) {
-      void fetch("/api/activity", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: "system",
-          message: `Added watched date: ${formatWatchDate(nextItem.date)} • ${
-            PASS_TYPES.find((item) => item.id === passType)?.name
-          } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`,
-          details: [`Check frequency • ${nextFrequency}`],
-        }),
-      }).catch(() => undefined);
-    }
+    persistActivityEntry({
+      source: "system",
+      message: `Added watched date: ${formatWatchDate(nextItem.date)} • ${
+        PASS_TYPES.find((item) => item.id === passType)?.name
+      } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`,
+      details: [`Check frequency • ${nextFrequency}`],
+    });
 
     pushToast("success", sessionUser ? "Watched date saved to your account." : "Watched date added.");
-  }, [feedRows, importedDisneyMembers, lastSyncAt, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
+  }, [feedRows, importedDisneyMembers, lastSyncAt, persistActivityEntry, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
 
   const addWatchItem = useCallback(async () => {
     await addWatchItemFromSelection({
@@ -889,22 +886,16 @@ export default function Home() {
           }`
         );
 
-        if (sessionUser) {
-          void fetch("/api/activity", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              source: "system",
-              message: `Removed watched date: ${formatWatchDate(item.date)} • ${
-                PASS_TYPES.find((row) => row.id === item.passType)?.name
-              }`,
-              details: [],
-            }),
-          }).catch(() => undefined);
-        }
+        persistActivityEntry({
+          source: "system",
+          message: `Removed watched date: ${formatWatchDate(item.date)} • ${
+            PASS_TYPES.find((row) => row.id === item.passType)?.name
+          }`,
+          details: [],
+        });
       }
     },
-    [watchItems, prependActivity, pushToast, sessionUser]
+    [watchItems, persistActivityEntry, prependActivity, pushToast, sessionUser]
   );
 
   const loadDisneyWorkerStatus = useCallback(async () => {
@@ -935,6 +926,36 @@ export default function Home() {
     setLatestImportJob(data.latestImportJob || null);
     setLatestBookingJob(data.latestBookingJob || null);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || !sessionUser) return;
+
+    const refreshVisibleServerState = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadDashboardState();
+      void loadDisneyWorkerStatus();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshVisibleServerState();
+      }
+    };
+
+    const onFocus = () => {
+      refreshVisibleServerState();
+    };
+
+    const interval = window.setInterval(refreshVisibleServerState, 30_000);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [hydrated, loadDashboardState, loadDisneyWorkerStatus, sessionUser]);
 
   const updateWatchItemBooking = useCallback(
     async (
