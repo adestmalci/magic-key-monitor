@@ -9,7 +9,9 @@
     "lint": "eslint",
     "worker:disney": "node scripts/disney-worker-service.mjs",
     "worker:disney:local": "node scripts/disney-worker-service.mjs",
-    "worker:disney:login": "node scripts/disney-local-login.mjs"
+    "worker:disney:login": "node scripts/disney-local-login.mjs",
+    "worker:disney:capture": "node scripts/disney-select-party-capture.mjs",
+    "test:disney-parser": "node scripts/test-disney-select-party-parser.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",
