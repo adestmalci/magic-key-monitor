@@ -515,7 +515,7 @@ export function ReservationAssistSection({
   }
 
   async function handleConnectSubmit() {
-    if (!disneyEmail.trim() || !password) return;
+    if (!disneyEmail.trim()) return;
     setIsConnecting(true);
     try {
       const normalizedEmail = disneyEmail.trim().toLowerCase();
@@ -527,7 +527,9 @@ export function ReservationAssistSection({
           disneyEmail: normalizedEmail,
           status: "pending_connect",
           lastQueuedJobId: typeof queued === "string" ? queued : plannerHubConnection.lastQueuedJobId,
-          lastRequiredActionMessage: "Waiting for the Disney worker to capture the planner session.",
+          lastRequiredActionMessage: password
+            ? "Waiting for the active local Mac to claim this Disney connect job and capture the planner session."
+            : "Waiting for the active local Mac to claim this Disney connect job using its local Disney session.",
           lastAuthFailureReason: "",
         });
         setPassword("");
