@@ -223,6 +223,7 @@ export async function sendTestEmailForUser(
           date: new Date().toISOString().slice(0, 10),
           passType: "enchant",
           preferredPark: "either",
+          eitherParkTieBreaker: "dl",
           plannerHubId: "primary",
           selectedImportedMemberIds: [],
           bookingMode: "watch_only",

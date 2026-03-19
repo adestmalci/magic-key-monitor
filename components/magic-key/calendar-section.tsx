@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, Clock3, X } from "lucide-react";
 import { useState } from "react";
 import { FREQUENCIES, PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
-import type { FrequencyType, ParkOption, PassType, WatchItem } from "../../lib/magic-key/types";
+import type { FrequencyType, ParkOption, ParkTieBreaker, PassType, WatchItem } from "../../lib/magic-key/types";
 import { classNames, formatMonthLabel, type CalendarCell } from "../../lib/magic-key/utils";
 import { PassIcon, ParkIcon, StatusIcon } from "./icons";
 
@@ -11,17 +11,21 @@ function QuickWatchFields({
   compact = false,
   quickPassType,
   quickPreferredPark,
+  quickEitherParkTieBreaker,
   quickSyncFrequency,
   onPassTypeChange,
   onPreferredParkChange,
+  onEitherParkTieBreakerChange,
   onSyncFrequencyChange,
 }: {
   compact?: boolean;
   quickPassType: PassType;
   quickPreferredPark: ParkOption;
+  quickEitherParkTieBreaker: ParkTieBreaker;
   quickSyncFrequency: FrequencyType;
   onPassTypeChange: (value: PassType) => void;
   onPreferredParkChange: (value: ParkOption) => void;
+  onEitherParkTieBreakerChange: (value: ParkTieBreaker) => void;
   onSyncFrequencyChange: (value: FrequencyType) => void;
 }) {
   return (
@@ -72,6 +76,32 @@ function QuickWatchFields({
         ))}
       </div>
 
+      {quickPreferredPark === "either" ? (
+        <>
+          <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            When both are open
+          </div>
+          <div className={classNames("mt-2 grid gap-2", compact ? "grid-cols-1" : "grid-cols-2")}>
+            {PARK_OPTIONS.filter((park) => park.value !== "either").map((park) => (
+              <button
+                key={park.value}
+                type="button"
+                onClick={() => onEitherParkTieBreakerChange(park.value as ParkTieBreaker)}
+                className={classNames(
+                  "flex items-center justify-center gap-2 rounded-2xl border px-2 py-2 text-center transition",
+                  quickEitherParkTieBreaker === park.value
+                    ? "border-violet-400 bg-white shadow-sm"
+                    : "border-white/80 bg-white/70 hover:border-violet-200"
+                )}
+              >
+                <ParkIcon park={park.value} size="h-4 w-4" />
+                <span className="text-[10px] font-medium text-zinc-700">{park.label} first</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+
       <label className="mt-3 grid gap-1.5">
         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
           Check frequency
@@ -98,6 +128,7 @@ export function CalendarSection({
   watchedByDate,
   defaultPassType,
   defaultPreferredPark,
+  defaultEitherParkTieBreaker,
   defaultSyncFrequency,
   onQuickWatch,
   onPreviousMonth,
@@ -108,11 +139,13 @@ export function CalendarSection({
   watchedByDate: Map<string, WatchItem[]>;
   defaultPassType: PassType;
   defaultPreferredPark: ParkOption;
+  defaultEitherParkTieBreaker: ParkTieBreaker;
   defaultSyncFrequency: FrequencyType;
   onQuickWatch: (payload: {
     date: string;
     passType: PassType;
     preferredPark: ParkOption;
+    eitherParkTieBreaker: ParkTieBreaker;
     syncFrequency: FrequencyType;
   }) => void;
   onPreviousMonth: () => void;
@@ -121,12 +154,14 @@ export function CalendarSection({
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [quickPassType, setQuickPassType] = useState<PassType>(defaultPassType);
   const [quickPreferredPark, setQuickPreferredPark] = useState<ParkOption>(defaultPreferredPark);
+  const [quickEitherParkTieBreaker, setQuickEitherParkTieBreaker] = useState<ParkTieBreaker>(defaultEitherParkTieBreaker);
   const [quickSyncFrequency, setQuickSyncFrequency] = useState<FrequencyType>(defaultSyncFrequency);
 
   function openQuickWatch(date: string) {
     setExpandedDate((current) => (current === date ? null : date));
     setQuickPassType(defaultPassType);
     setQuickPreferredPark(defaultPreferredPark);
+    setQuickEitherParkTieBreaker(defaultEitherParkTieBreaker);
     setQuickSyncFrequency(defaultSyncFrequency);
   }
 
@@ -243,9 +278,11 @@ export function CalendarSection({
                           <QuickWatchFields
                             quickPassType={quickPassType}
                             quickPreferredPark={quickPreferredPark}
+                            quickEitherParkTieBreaker={quickEitherParkTieBreaker}
                             quickSyncFrequency={quickSyncFrequency}
                             onPassTypeChange={setQuickPassType}
                             onPreferredParkChange={setQuickPreferredPark}
+                            onEitherParkTieBreakerChange={setQuickEitherParkTieBreaker}
                             onSyncFrequencyChange={setQuickSyncFrequency}
                           />
 
@@ -258,6 +295,7 @@ export function CalendarSection({
                                   date: cell.date,
                                   passType: quickPassType,
                                   preferredPark: quickPreferredPark,
+                                  eitherParkTieBreaker: quickPreferredPark === "either" ? quickEitherParkTieBreaker : "",
                                   syncFrequency: quickSyncFrequency,
                                 });
                               }}
@@ -342,9 +380,11 @@ export function CalendarSection({
                 compact
                 quickPassType={quickPassType}
                 quickPreferredPark={quickPreferredPark}
+                quickEitherParkTieBreaker={quickEitherParkTieBreaker}
                 quickSyncFrequency={quickSyncFrequency}
                 onPassTypeChange={setQuickPassType}
                 onPreferredParkChange={setQuickPreferredPark}
+                onEitherParkTieBreakerChange={setQuickEitherParkTieBreaker}
                 onSyncFrequencyChange={setQuickSyncFrequency}
               />
             </div>
@@ -359,6 +399,7 @@ export function CalendarSection({
                     date: expandedDate,
                     passType: quickPassType,
                     preferredPark: quickPreferredPark,
+                    eitherParkTieBreaker: quickPreferredPark === "either" ? quickEitherParkTieBreaker : "",
                     syncFrequency: quickSyncFrequency,
                   });
                 }}

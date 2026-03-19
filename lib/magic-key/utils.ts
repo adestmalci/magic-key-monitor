@@ -1,4 +1,4 @@
-import type { FeedRow, ImportedDisneyMember, StatusType, SyncMeta, WatchItem } from "./types";
+import type { FeedRow, ImportedDisneyMember, ParkTieBreaker, StatusType, SyncMeta, WatchItem } from "./types";
 
 export type CalendarCell = {
   date: string;
@@ -172,6 +172,17 @@ export function resolveStatus(
   return "unavailable";
 }
 
+export function normalizeParkTieBreaker(value: unknown): ParkTieBreaker {
+  return value === "dl" || value === "dca" ? value : "";
+}
+
+export function resolveAutoBookingPark(
+  item: Pick<WatchItem, "preferredPark" | "eitherParkTieBreaker">
+): WatchItem["preferredPark"] {
+  if (item.preferredPark !== "either") return item.preferredPark;
+  return item.eitherParkTieBreaker || "either";
+}
+
 function intersectStatuses(statuses: StatusType[]): StatusType {
   if (statuses.length === 0) return "unavailable";
   if (statuses.some((status) => status === "blocked")) return "blocked";
@@ -187,7 +198,7 @@ function intersectStatuses(statuses: StatusType[]): StatusType {
 }
 
 export function resolveWatchItemStatus(
-  item: Pick<WatchItem, "date" | "passType" | "preferredPark" | "selectedImportedMemberIds">,
+  item: Pick<WatchItem, "date" | "passType" | "preferredPark" | "eitherParkTieBreaker" | "selectedImportedMemberIds">,
   lookup: Map<string, StatusType>,
   importedMembers: ImportedDisneyMember[]
 ): StatusType {
@@ -209,7 +220,7 @@ export function resolveWatchItemStatus(
         {
           date: item.date,
           passType: member.magicKeyPassType as WatchItem["passType"],
-          preferredPark: item.preferredPark,
+          preferredPark: resolveAutoBookingPark(item),
         },
         lookup
       )

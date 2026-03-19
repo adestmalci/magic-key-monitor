@@ -26,10 +26,16 @@ import type {
   ReservationHandoffOutcome,
   ReservationSessionStatus,
   SessionUser,
-  SyncMeta,
   WatchItem,
 } from "../../lib/magic-key/types";
-import { buildFeedLookup, classNames, formatSyncTime, formatWatchDate, resolveStatus } from "../../lib/magic-key/utils";
+import {
+  buildFeedLookup,
+  classNames,
+  formatSyncTime,
+  formatWatchDate,
+  resolveAutoBookingPark,
+  resolveStatus,
+} from "../../lib/magic-key/utils";
 
 type ReservationAssistSectionProps = {
   reservationAssist: ReservationAssistState;
@@ -40,7 +46,6 @@ type ReservationAssistSectionProps = {
   latestBookingJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
   localWorkerDevices: LocalWorkerDevice[];
-  syncMeta: SyncMeta;
   sessionUser: SessionUser | null;
   watchItems: WatchItem[];
   feedRows: FeedRow[];
@@ -49,7 +54,7 @@ type ReservationAssistSectionProps = {
   onPlannerHubConnectionChange: (patch: Partial<PlannerHubConnectionState>) => void;
   onWatchItemBookingChange: (
     id: string,
-    patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode">>
+    patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode" | "eitherParkTieBreaker">>
   ) => void;
   onConnectDisney: (disneyEmail: string, password: string) => Promise<boolean | string> | boolean | string;
   onCreateLocalWorkerPairToken: (deviceName: string) => Promise<string> | string;
@@ -191,11 +196,12 @@ function summarizeEligibility(member: ImportedDisneyMember, item: WatchItem, loo
     return { eligible: false, status: "unavailable" as const };
   }
 
+  const effectivePreferredPark = resolveAutoBookingPark(item);
   const status = resolveStatus(
     {
       date: item.date,
       passType: member.magicKeyPassType,
-      preferredPark: item.preferredPark,
+      preferredPark: effectivePreferredPark,
     },
     lookup
   );
@@ -258,6 +264,14 @@ function cleanDisplayLabel(label: string | undefined | null) {
   return label.replace(/\s+\(([^)]+)\)\s*$/, "").trim();
 }
 
+function formatPreferredParkLabel(item: WatchItem) {
+  if (item.preferredPark === "dl") return "Disneyland";
+  if (item.preferredPark === "dca") return "California Adventure";
+  if (item.eitherParkTieBreaker === "dl") return "Either Park · Disneyland first";
+  if (item.eitherParkTieBreaker === "dca") return "Either Park · California Adventure first";
+  return "Either Park";
+}
+
 export function ReservationAssistSection({
   reservationAssist,
   plannerHubBooking,
@@ -267,7 +281,6 @@ export function ReservationAssistSection({
   latestBookingJob,
   importedDisneyMembers,
   localWorkerDevices,
-  syncMeta,
   sessionUser,
   watchItems,
   feedRows,
@@ -455,6 +468,9 @@ export function ReservationAssistSection({
   );
   const selectedCount = selectedMagicKeyRows.length;
   const targetAutoBookingEnabled = Boolean(currentTarget && currentTarget.bookingMode === "watch_and_attempt");
+  const currentTargetNeedsTieBreaker = Boolean(
+    currentTarget && currentTarget.preferredPark === "either" && !currentTarget.eitherParkTieBreaker
+  );
   const verificationProgress = [
     reservationAssist.plannerHubConfirmed,
     reservationAssist.partyProofCaptured,
@@ -635,6 +651,14 @@ export function ReservationAssistSection({
       };
     }
 
+    if (currentTargetNeedsTieBreaker) {
+      return {
+        label: "Needs selection",
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        message: "Choose which park should be preferred when both parks are open before auto booking can run.",
+      };
+    }
+
     if (!plannerHubBooking.enabled) {
       return {
         label: "Auto booking is off",
@@ -678,6 +702,7 @@ export function ReservationAssistSection({
     };
   }, [
     currentTarget,
+    currentTargetNeedsTieBreaker,
     plannerHubConnection.hasLocalSession,
     plannerHubConnection.status,
     selectedCount,
@@ -705,14 +730,24 @@ export function ReservationAssistSection({
 
     if (!targetAutoBookingEnabled) {
       return {
-        label: "Inactive",
+        label: currentTargetNeedsTieBreaker ? "Needs selection" : "Inactive",
         tone: "border-zinc-200 bg-zinc-50 text-zinc-700",
-        message: "Turn on auto booking for this watched date when you want the local Mac to keep trying automatically.",
+        message: currentTargetNeedsTieBreaker
+          ? "Choose which park should be preferred when both parks are open for this watched date."
+          : "Turn on auto booking for this watched date when you want the local Mac to keep trying automatically.",
       };
     }
 
     return bookingReadiness;
-  }, [bookingJobActive, bookingReadiness, currentTarget, latestBookingJob?.lastMessage, latestBookingJob?.targetWatchItemId, targetAutoBookingEnabled]);
+  }, [
+    bookingJobActive,
+    bookingReadiness,
+    currentTarget,
+    currentTargetNeedsTieBreaker,
+    latestBookingJob?.lastMessage,
+    latestBookingJob?.targetWatchItemId,
+    targetAutoBookingEnabled,
+  ]);
 
   function stampVerification(patch: Partial<ReservationAssistState>) {
     onReservationAssistChange({
@@ -839,7 +874,7 @@ export function ReservationAssistSection({
   }
 
   function handleToggleAutoBooking() {
-    if (!currentTarget) return;
+    if (!currentTarget || currentTargetNeedsTieBreaker) return;
 
     const nextEnabled = !targetAutoBookingEnabled;
     onPlannerHubBookingChange({
@@ -1437,7 +1472,7 @@ export function ReservationAssistSection({
             </span>
           </div>
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="mt-4 space-y-4">
             <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-5 py-5">
               <div className="text-sm font-semibold text-zinc-900">Magic Key members</div>
               <div className="mt-3 space-y-3">
@@ -1452,15 +1487,15 @@ export function ReservationAssistSection({
                         key={member.id}
                         className="rounded-[24px] border border-violet-100 bg-white px-5 py-4 text-sm text-zinc-700 shadow-sm shadow-violet-100/40"
                       >
-                        <div className="grid grid-cols-[52px_minmax(0,1fr)] items-center gap-4">
+                        <div className="grid grid-cols-[48px_minmax(0,1fr)] items-center gap-4">
                           {passMeta ? (
-                            <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[18px] border border-violet-100 bg-violet-50">
-                              <PassIcon passType={passMeta.id} size="h-6 w-6" />
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] border border-violet-100 bg-violet-50">
+                              <PassIcon passType={passMeta.id} size="h-5 w-5" />
                             </div>
                           ) : null}
                           <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <div className="min-w-0 truncate text-[0.98rem] font-semibold leading-tight text-zinc-900">{member.displayName}</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="min-w-0 text-[0.95rem] font-semibold leading-tight text-zinc-900">{member.displayName}</div>
                               {passMeta ? (
                                 <span className="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
                                   {passMeta.short}
@@ -1468,7 +1503,7 @@ export function ReservationAssistSection({
                               ) : null}
                             </div>
                             {cleanLabel && (
-                              <div className="mt-1 truncate text-sm leading-6 text-zinc-600">{cleanLabel}</div>
+                              <div className="mt-1 text-sm leading-6 text-zinc-600">{cleanLabel}</div>
                             )}
                           </div>
                         </div>
@@ -1488,7 +1523,7 @@ export function ReservationAssistSection({
                   ticketHolders.map((member) => {
                     const cleanLabel = cleanDisplayLabel(member.passLabel || member.entitlementLabel);
                     return (
-                      <div key={member.id} className="max-w-[360px] rounded-[24px] border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
+                      <div key={member.id} className="rounded-[24px] border border-zinc-200 bg-white px-5 py-4 text-sm text-zinc-700">
                         <div className="font-semibold text-zinc-900">{member.displayName}</div>
                         <div className="mt-1 text-zinc-500">{cleanLabel}</div>
                         <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
@@ -1513,19 +1548,19 @@ export function ReservationAssistSection({
               <p className="mt-3 text-sm leading-6 text-zinc-600">Add a watched date first, then choose the imported Disney members who should be targeted for that date.</p>
             ) : (
               <>
-                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_208px] lg:items-end">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-end">
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-zinc-700">Watched date</span>
                     <select
                       value={currentTarget?.id ?? ""}
                       onChange={(event) => setTargetWatchId(event.target.value)}
-                      className="w-full min-w-0 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
+                      className="w-full min-w-0 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-[0.96rem] text-zinc-900 outline-none transition focus:border-violet-300"
                     >
                       {watchItems.map((item) => {
                         const passName = PASS_TYPES.find((pass) => pass.id === item.passType)?.name ?? item.passType;
                         return (
                           <option key={item.id} value={item.id}>
-                            {formatWatchDate(item.date)} · {passName}
+                            {formatWatchDate(item.date)} · {formatPreferredParkLabel(item)} · {passName}
                           </option>
                         );
                       })}
@@ -1534,13 +1569,13 @@ export function ReservationAssistSection({
                   <button
                     type="button"
                     onClick={handleToggleAutoBooking}
-                    disabled={!currentTarget}
+                    disabled={!currentTarget || currentTargetNeedsTieBreaker}
                     className={classNames(
-                      "inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition lg:w-[208px]",
+                      "inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition lg:w-[220px]",
                       targetAutoBookingEnabled
                         ? "border border-violet-200 bg-violet-600 text-white"
                         : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50",
-                      !currentTarget ? "cursor-not-allowed opacity-50" : ""
+                      !currentTarget || currentTargetNeedsTieBreaker ? "cursor-not-allowed opacity-50" : ""
                     )}
                   >
                     {targetAutoBookingEnabled ? "Turn off auto booking" : "Turn on auto booking"}
@@ -1550,6 +1585,37 @@ export function ReservationAssistSection({
 
                 {currentTarget && (
                   <div className="mt-4 space-y-4">
+                    {currentTarget.preferredPark === "either" && (
+                      <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-4">
+                        <div className="text-sm font-semibold text-zinc-900">When both parks are open</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {[
+                            { value: "dl" as const, label: "Disneyland first" },
+                            { value: "dca" as const, label: "California Adventure first" },
+                          ].map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() =>
+                                onWatchItemBookingChange(currentTarget.id, {
+                                  plannerHubId: plannerHubConnection.plannerHubId || "primary",
+                                  eitherParkTieBreaker: option.value,
+                                })
+                              }
+                              className={classNames(
+                                "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition",
+                                currentTarget.eitherParkTieBreaker === option.value
+                                  ? "border-violet-300 bg-violet-50 text-violet-900"
+                                  : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300"
+                              )}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {magicKeyTargetRows.length === 0 ? (
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
                         Import the connected Disney party first so you can choose Magic Key targets for this watched date.
@@ -1572,7 +1638,7 @@ export function ReservationAssistSection({
                                 disabled ? "opacity-70" : ""
                               )}
                             >
-                              <div className="flex items-center gap-3">
+                              <div className="grid grid-cols-[24px_minmax(0,1fr)] items-center gap-4">
                                 <input
                                   type="checkbox"
                                   checked={selected}
@@ -1588,23 +1654,23 @@ export function ReservationAssistSection({
                                   }}
                                   className="h-4 w-4 shrink-0 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
                                 />
-                                <span className="min-w-0 flex-1">
-                                  <span className="grid grid-cols-[52px_minmax(0,1fr)] items-center gap-4">
+                                <span className="min-w-0">
+                                  <span className="grid grid-cols-[48px_minmax(0,1fr)] items-center gap-4">
                                   {passMeta ? (
-                                    <span className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[18px] border border-violet-100 bg-violet-50">
-                                      <PassIcon passType={passMeta.id} size="h-6 w-6" />
+                                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] border border-violet-100 bg-violet-50">
+                                      <PassIcon passType={passMeta.id} size="h-5 w-5" />
                                     </span>
                                   ) : null}
                                   <span className="min-w-0 flex-1">
-                                    <span className="flex min-w-0 items-center gap-2">
-                                      <span className="min-w-0 truncate text-[0.98rem] font-semibold leading-tight text-zinc-900">{member.displayName}</span>
+                                    <span className="flex flex-wrap items-center gap-2">
+                                      <span className="min-w-0 text-[0.95rem] font-semibold leading-tight text-zinc-900">{member.displayName}</span>
                                       {passMeta ? (
                                         <span className="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
                                           {passMeta.short}
                                         </span>
                                       ) : null}
                                     </span>
-                                    <span className="mt-1 block truncate text-sm leading-6 text-zinc-600">{cleanLabel}</span>
+                                    <span className="mt-1 block text-sm leading-6 text-zinc-600">{cleanLabel}</span>
                                     <span
                                       className={classNames(
                                         "mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold",

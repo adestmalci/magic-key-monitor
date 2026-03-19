@@ -10,7 +10,7 @@ import {
 } from "node:crypto";
 import { normalizeSupportedFrequency } from "./config";
 import { getDataPath, readStoredValue, writeStoredValue } from "./storage";
-import { buildFeedLookup, resolveWatchItemStatus } from "./utils";
+import { buildFeedLookup, normalizeParkTieBreaker, resolveAutoBookingPark, resolveWatchItemStatus } from "./utils";
 import type {
   ActivityItem,
   BookingMode,
@@ -126,6 +126,7 @@ type PlannerHubClaimResult = {
       watchItemId: string;
       watchDate: string;
       preferredPark: WatchItem["preferredPark"];
+      eitherParkTieBreaker: WatchItem["eitherParkTieBreaker"];
       passType: WatchItem["passType"];
       selectedMembers: ImportedDisneyMember[];
     } | null;
@@ -1167,6 +1168,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       date: item.date,
       passType: item.passType,
       preferredPark: item.preferredPark,
+      eitherParkTieBreaker: normalizeParkTieBreaker(item.eitherParkTieBreaker),
       currentStatus: item.currentStatus,
       previousStatus: item.previousStatus,
       lastCheckedAt: item.lastCheckedAt,
@@ -1357,7 +1359,7 @@ export async function upsertPreferencesForUser(
 
 export async function createWatchItemForUser(
   userId: string,
-  payload: Pick<WatchItem, "date" | "passType" | "preferredPark">,
+  payload: Pick<WatchItem, "date" | "passType" | "preferredPark" | "eitherParkTieBreaker">,
   lastKnownFeed: FeedRow[]
 ) {
   const state = await readBackendState();
@@ -1386,12 +1388,20 @@ export async function createWatchItemForUser(
     };
   }
 
+  if (payload.preferredPark === "either" && !normalizeParkTieBreaker(payload.eitherParkTieBreaker)) {
+    return {
+      ok: false as const,
+      error: "Choose which park should be preferred when both parks are open.",
+    };
+  }
+
   const nextItem: StoredWatchItem = {
     id: randomUUID(),
     userId,
     date: payload.date,
     passType: payload.passType,
     preferredPark: payload.preferredPark,
+    eitherParkTieBreaker: payload.preferredPark === "either" ? normalizeParkTieBreaker(payload.eitherParkTieBreaker) : "",
     currentStatus: nextStatus,
     previousStatus: null,
     lastCheckedAt: checkedAt,
@@ -1412,6 +1422,7 @@ export async function createWatchItemForUser(
       date: nextItem.date,
       passType: nextItem.passType,
       preferredPark: nextItem.preferredPark,
+      eitherParkTieBreaker: nextItem.eitherParkTieBreaker,
       currentStatus: nextItem.currentStatus,
       previousStatus: nextItem.previousStatus,
       lastCheckedAt: nextItem.lastCheckedAt,
@@ -1454,6 +1465,8 @@ export async function importWatchItemsForUser(userId: string, items: WatchItem[]
       date: item.date,
       passType: item.passType,
       preferredPark: item.preferredPark,
+      eitherParkTieBreaker:
+        item.preferredPark === "either" ? normalizeParkTieBreaker((item as WatchItem).eitherParkTieBreaker) : "",
       currentStatus: resolveWatchItemStatus(
         {
           ...item,
@@ -1478,7 +1491,7 @@ export async function importWatchItemsForUser(userId: string, items: WatchItem[]
 export async function updateWatchItemForUser(
   userId: string,
   id: string,
-  patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode">>
+  patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode" | "eitherParkTieBreaker">>
 ) {
   const state = await readBackendState();
   const item = state.watchItems.find((row) => row.userId === userId && row.id === id);
@@ -1496,6 +1509,12 @@ export async function updateWatchItemForUser(
       ? normalizeSelectedImportedMemberIds(item.selectedImportedMemberIds)
       : normalizeSelectedImportedMemberIds(patch.selectedImportedMemberIds);
   item.bookingMode = patch.bookingMode ? normalizeBookingMode(patch.bookingMode) : normalizeBookingMode(item.bookingMode);
+  item.eitherParkTieBreaker =
+    item.preferredPark === "either"
+      ? patch.eitherParkTieBreaker === undefined
+        ? normalizeParkTieBreaker(item.eitherParkTieBreaker)
+        : normalizeParkTieBreaker(patch.eitherParkTieBreaker)
+      : "";
   item.updatedAt = new Date().toISOString();
 
   const lookup = buildFeedLookup(await readStoredFeed());
@@ -1526,6 +1545,7 @@ export async function updateWatchItemForUser(
       date: item.date,
       passType: item.passType,
       preferredPark: item.preferredPark,
+      eitherParkTieBreaker: item.eitherParkTieBreaker,
       currentStatus: item.currentStatus,
       previousStatus: item.previousStatus,
       lastCheckedAt: item.lastCheckedAt,
@@ -1677,6 +1697,7 @@ function plannerHubReadyForAutoAttempt(preferences: StoredPreferences, item: Sto
     preferences.plannerHubConnection.status === "connected" &&
     preferences.plannerHubConnection.hasLocalSession &&
     preferences.reservationAssist.stepTwoVerified &&
+    (item.preferredPark !== "either" || Boolean(normalizeParkTieBreaker(item.eitherParkTieBreaker))) &&
     item.selectedImportedMemberIds.length > 0 &&
     isWatchStatusReservable(item.currentStatus)
   );
@@ -2489,7 +2510,8 @@ export async function claimNextPlannerHubJobForLocalDevice(
           return {
             watchItemId: job.targetWatchItemId,
             watchDate: job.targetWatchDate,
-            preferredPark: watchItem?.preferredPark ?? "either",
+            preferredPark: watchItem ? resolveAutoBookingPark(watchItem) : "either",
+            eitherParkTieBreaker: watchItem ? normalizeParkTieBreaker(watchItem.eitherParkTieBreaker) : "",
             passType: watchItem?.passType ?? "enchant",
             selectedMembers: job.targetMemberIds
               .map((memberId) => importedById.get(memberId))
@@ -2661,7 +2683,8 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
           return {
             watchItemId: job.targetWatchItemId,
             watchDate: job.targetWatchDate,
-            preferredPark: watchItem?.preferredPark ?? "either",
+            preferredPark: watchItem ? resolveAutoBookingPark(watchItem) : "either",
+            eitherParkTieBreaker: watchItem ? normalizeParkTieBreaker(watchItem.eitherParkTieBreaker) : "",
             passType: watchItem?.passType ?? "enchant",
             selectedMembers: job.targetMemberIds
               .map((memberId) => importedById.get(memberId))

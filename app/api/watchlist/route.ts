@@ -34,6 +34,7 @@ export async function POST(request: Request) {
       date: String(body?.date || ""),
       passType: body?.passType,
       preferredPark: body?.preferredPark,
+      eitherParkTieBreaker: body?.eitherParkTieBreaker,
     },
     rows
   );

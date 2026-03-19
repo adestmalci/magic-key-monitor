@@ -1,5 +1,6 @@
 export type PassType = "inspire" | "believe" | "enchant" | "explore" | "imagine";
 export type ParkOption = "either" | "dl" | "dca";
+export type ParkTieBreaker = "" | "dl" | "dca";
 export type StatusType = "either" | "dl" | "dca" | "unavailable" | "blocked";
 export type FrequencyType = "manual" | "1m" | "5m" | "10m" | "15m" | "30m";
 export type TabKey = "watchlist" | "calendar" | "activity" | "reserve" | "alerts";
@@ -59,6 +60,7 @@ export type WatchItem = {
   date: string;
   passType: PassType;
   preferredPark: ParkOption;
+  eitherParkTieBreaker: ParkTieBreaker;
   currentStatus: StatusType;
   previousStatus: StatusType | null;
   lastCheckedAt: string;

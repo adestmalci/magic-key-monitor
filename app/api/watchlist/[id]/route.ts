@@ -25,6 +25,7 @@ export async function PATCH(
     plannerHubId: body?.plannerHubId,
     selectedImportedMemberIds: body?.selectedImportedMemberIds,
     bookingMode: body?.bookingMode,
+    eitherParkTieBreaker: body?.eitherParkTieBreaker,
   });
 
   if (!result.ok) {

@@ -21,6 +21,7 @@ import type {
   FeedRow,
   FrequencyType,
   ParkOption,
+  ParkTieBreaker,
   PassType,
   PlannerHubConnectionState,
   PlannerHubBookingState,
@@ -43,6 +44,7 @@ import {
   currentMonthKey,
   formatWatchDate,
   monthKeyFromDate,
+  normalizeParkTieBreaker,
   needsIosHomeScreenNotifications,
   nextMonthKey,
   normalizeStatus,
@@ -86,6 +88,7 @@ export default function Home() {
 
   const [passType, setPassType] = useState<PassType>("enchant");
   const [preferredPark, setPreferredPark] = useState<ParkOption>("either");
+  const [eitherParkTieBreaker, setEitherParkTieBreaker] = useState<ParkTieBreaker>("");
   const [syncFrequency, setSyncFrequency] = useState<FrequencyType>("5m");
 
   const [alertsEnabled, setAlertsEnabled] = useState(false);
@@ -298,6 +301,7 @@ export default function Home() {
       setActiveTab(parsed.activeTab ?? "watchlist");
       setPassType(parsed.passType ?? "enchant");
       setPreferredPark(parsed.preferredPark ?? "either");
+      setEitherParkTieBreaker(normalizeParkTieBreaker(parsed.eitherParkTieBreaker));
       setSyncFrequency(normalizeSupportedFrequency(parsed.syncFrequency));
       setAlertsEnabled(parsed.alertsEnabled ?? false);
       setEmailEnabled(parsed.emailEnabled ?? false);
@@ -342,6 +346,7 @@ export default function Home() {
             currentStatus: normalizeStatus(String(item.currentStatus)),
             lastCheckedAt: item.lastCheckedAt ?? item.changedAt ?? parsed.lastSyncAt ?? "",
             plannerHubId: item.plannerHubId || "primary",
+            eitherParkTieBreaker: normalizeParkTieBreaker((item as WatchItem & { eitherParkTieBreaker?: ParkTieBreaker }).eitherParkTieBreaker),
             selectedImportedMemberIds: Array.isArray(item.selectedImportedMemberIds)
               ? item.selectedImportedMemberIds.filter((value): value is string => typeof value === "string")
               : [],
@@ -368,6 +373,7 @@ export default function Home() {
         activeTab,
         passType,
         preferredPark,
+        eitherParkTieBreaker,
         syncFrequency,
         alertsEnabled,
         emailEnabled,
@@ -389,6 +395,7 @@ export default function Home() {
     activeTab,
     passType,
     preferredPark,
+    eitherParkTieBreaker,
     syncFrequency,
     alertsEnabled,
     emailEnabled,
@@ -655,18 +662,6 @@ export default function Home() {
     void syncFeed("auto", false, "Selected key changed");
   }, [hydrated, passType, syncFeed]);
 
-  const summary = useMemo(() => {
-    const counts = { available: 0, unavailable: 0, blocked: 0 };
-
-    for (const item of watchItems) {
-      if (["either", "dl", "dca"].includes(item.currentStatus)) counts.available += 1;
-      else if (item.currentStatus === "blocked") counts.blocked += 1;
-      else counts.unavailable += 1;
-    }
-
-    return counts;
-  }, [watchItems]);
-
   const watchedByDate = useMemo(() => {
     const next = new Map<string, WatchItem[]>();
 
@@ -752,11 +747,13 @@ export default function Home() {
     date,
     passType,
     preferredPark,
+    eitherParkTieBreaker,
     syncFrequency: nextFrequency,
   }: {
     date: string;
     passType: PassType;
     preferredPark: ParkOption;
+    eitherParkTieBreaker: ParkTieBreaker;
     syncFrequency: FrequencyType;
   }) => {
     if (!date) {
@@ -768,10 +765,14 @@ export default function Home() {
       setSyncFrequency(nextFrequency);
     }
 
-    const duplicate = watchItems.some(
-      (item) =>
-        item.date === date && item.passType === passType && item.preferredPark === preferredPark
-    );
+    const normalizedTieBreaker = preferredPark === "either" ? normalizeParkTieBreaker(eitherParkTieBreaker) : "";
+
+    if (preferredPark === "either" && !normalizedTieBreaker) {
+      pushToast("error", "Choose which park should be preferred when both parks are open.");
+      return;
+    }
+
+    const duplicate = watchItems.some((item) => item.date === date && item.passType === passType && item.preferredPark === preferredPark);
 
     if (duplicate) {
       pushToast("error", "That watched date already exists.");
@@ -784,6 +785,7 @@ export default function Home() {
         date,
         passType,
         preferredPark,
+        eitherParkTieBreaker: normalizedTieBreaker,
         selectedImportedMemberIds: [],
       },
       lookup,
@@ -800,6 +802,7 @@ export default function Home() {
       date,
       passType,
       preferredPark,
+      eitherParkTieBreaker: normalizedTieBreaker,
       currentStatus: nextStatus,
       previousStatus: null,
       lastCheckedAt: lastSyncAt,
@@ -812,7 +815,7 @@ export default function Home() {
       const response = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, passType, preferredPark }),
+        body: JSON.stringify({ date, passType, preferredPark, eitherParkTieBreaker: normalizedTieBreaker }),
       });
 
       const data = await response.json();
@@ -834,7 +837,11 @@ export default function Home() {
       "system",
       `Added watched date: ${formatWatchDate(nextItem.date)} • ${
         PASS_TYPES.find((item) => item.id === passType)?.name
-      } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`,
+      } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}${
+        preferredPark === "either" && normalizedTieBreaker
+          ? ` • ${PARK_OPTIONS.find((item) => item.value === normalizedTieBreaker)?.label} first`
+          : ""
+      }`,
       [`Check frequency • ${nextFrequency}`]
     );
 
@@ -842,7 +849,11 @@ export default function Home() {
       source: "system",
       message: `Added watched date: ${formatWatchDate(nextItem.date)} • ${
         PASS_TYPES.find((item) => item.id === passType)?.name
-      } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}`,
+      } • ${PARK_OPTIONS.find((item) => item.value === preferredPark)?.label}${
+        preferredPark === "either" && normalizedTieBreaker
+          ? ` • ${PARK_OPTIONS.find((item) => item.value === normalizedTieBreaker)?.label} first`
+          : ""
+      }`,
       details: [`Check frequency • ${nextFrequency}`],
     });
 
@@ -854,9 +865,10 @@ export default function Home() {
       date: dateInput,
       passType,
       preferredPark,
+      eitherParkTieBreaker,
       syncFrequency,
     });
-  }, [addWatchItemFromSelection, dateInput, passType, preferredPark, syncFrequency]);
+  }, [addWatchItemFromSelection, dateInput, eitherParkTieBreaker, passType, preferredPark, syncFrequency]);
 
   const removeWatchItem = useCallback(
     async (id: string) => {
@@ -960,7 +972,7 @@ export default function Home() {
   const updateWatchItemBooking = useCallback(
     async (
       id: string,
-      patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode">>
+      patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode" | "eitherParkTieBreaker">>
     ) => {
       const applyLocal = (item: WatchItem) => {
         const nextItem = {
@@ -968,6 +980,12 @@ export default function Home() {
           plannerHubId: patch.plannerHubId ?? item.plannerHubId,
           selectedImportedMemberIds: patch.selectedImportedMemberIds ?? item.selectedImportedMemberIds,
           bookingMode: patch.bookingMode ?? item.bookingMode,
+          eitherParkTieBreaker:
+            item.preferredPark === "either"
+              ? patch.eitherParkTieBreaker === undefined
+                ? normalizeParkTieBreaker(item.eitherParkTieBreaker)
+                : normalizeParkTieBreaker(patch.eitherParkTieBreaker)
+              : "",
         };
 
         return {
@@ -1318,6 +1336,8 @@ export default function Home() {
             onDateInputChange={setDateInput}
             preferredPark={preferredPark}
             onPreferredParkChange={setPreferredPark}
+            eitherParkTieBreaker={eitherParkTieBreaker}
+            onEitherParkTieBreakerChange={setEitherParkTieBreaker}
             syncFrequency={syncFrequency}
             onSyncFrequencyChange={setSyncFrequency}
             pickerMonth={pickerMonth}
@@ -1327,15 +1347,17 @@ export default function Home() {
             canGoNextMonth={pickerMonth < pickerMonthBounds.max}
             onPreviousMonth={() => setPickerMonth(previousMonthKey(pickerMonth))}
             onNextMonth={() => setPickerMonth(nextMonthKey(pickerMonth))}
-            watchCount={watchItems.length}
-            summary={summary}
-            lastSyncAt={lastSyncAt}
-            syncMeta={syncMeta}
             onAddWatchItem={() => void addWatchItem()}
           />
         </section>
 
-        <TabsNav activeTab={activeTab} tabs={tabs} onTabChange={setActiveTab} />
+        <TabsNav
+          activeTab={activeTab}
+          tabs={tabs}
+          onTabChange={setActiveTab}
+          syncMeta={syncMeta}
+          lastSyncAt={lastSyncAt}
+        />
 
         {activeTab === "watchlist" && (
           <WatchlistSection
@@ -1358,6 +1380,7 @@ export default function Home() {
             watchedByDate={watchedByDate}
             defaultPassType={passType}
             defaultPreferredPark={preferredPark}
+            defaultEitherParkTieBreaker={eitherParkTieBreaker}
             defaultSyncFrequency={syncFrequency}
             onQuickWatch={(payload) => void addWatchItemFromSelection(payload)}
             onPreviousMonth={() => setDisplayedMonth(previousMonthKey(displayedMonth))}
@@ -1377,7 +1400,6 @@ export default function Home() {
             latestBookingJob={latestBookingJob}
             importedDisneyMembers={importedDisneyMembers}
             localWorkerDevices={localWorkerDevices}
-            syncMeta={syncMeta}
             sessionUser={sessionUser}
             watchItems={watchItems}
             feedRows={feedRows}

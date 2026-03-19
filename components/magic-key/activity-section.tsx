@@ -38,7 +38,7 @@ function EmptyState({ title, body }: { title: string; body: string }) {
 
 export function ActivitySection({ activity }: { activity: ActivityItem[] }) {
   return (
-    <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
+    <section className="flex max-h-[72vh] min-h-0 flex-col rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="flex items-center gap-2 text-2xl font-semibold text-zinc-900">
         <RefreshCcw className="h-6 w-6 text-violet-600" />
         Sync history
@@ -48,7 +48,7 @@ export function ActivitySection({ activity }: { activity: ActivityItem[] }) {
         Manual and automatic syncs are labeled differently so the history is easier to read.
       </p>
 
-      <div className="mt-6">
+      <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
         {activity.length === 0 ? (
           <EmptyState
             title="No sync activity yet"
