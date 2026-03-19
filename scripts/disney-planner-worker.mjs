@@ -35,6 +35,13 @@ function log(message, details) {
   console.log(`[disney-worker] ${message}`);
 }
 
+function normalizeMemberMatchValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 function createWorkerApi({ appUrl, workerSecret }) {
   assertWorkerEnv(appUrl, workerSecret);
 
@@ -349,6 +356,134 @@ async function scrapeConnectedMembers(page, progress) {
   return { ok: true, importedDisneyMembers, diagnostics };
 }
 
+async function checkVisibleCheckbox(row) {
+  const input = row.locator('input[type="checkbox"]').first();
+  if ((await input.count()) > 0) {
+    try {
+      await input.check({ force: true, timeout: 1500 });
+      return true;
+    } catch {
+      try {
+        await input.click({ force: true, timeout: 1500 });
+        return true;
+      } catch {
+        // fall through
+      }
+    }
+  }
+
+  const label = row.locator("label").first();
+  if ((await label.count()) > 0) {
+    try {
+      await label.click({ force: true, timeout: 1500 });
+      return true;
+    } catch {
+      // fall through
+    }
+  }
+
+  try {
+    await row.click({ force: true, timeout: 1500 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function selectBookingTargetRows(page, selectedMembers) {
+  const rowLocator = page.locator(".sectionContainer");
+  const rowCount = await rowLocator.count();
+  const matchedMembers = [];
+  const missingMembers = [];
+
+  for (const member of selectedMembers) {
+    const targetName = normalizeMemberMatchValue(member.displayName);
+    const targetPass = normalizeMemberMatchValue(member.passLabel);
+    let matched = false;
+
+    for (let index = 0; index < rowCount; index += 1) {
+      const row = rowLocator.nth(index);
+      const rowText = normalizeMemberMatchValue(await row.innerText().catch(() => ""));
+      if (!rowText.includes(targetName) || !rowText.includes(targetPass)) continue;
+      if (!await checkVisibleCheckbox(row)) continue;
+      matchedMembers.push(member);
+      matched = true;
+      break;
+    }
+
+    if (!matched) {
+      missingMembers.push(member);
+    }
+  }
+
+  return { matchedMembers, missingMembers };
+}
+
+async function clickBookingContinue(page) {
+  const selectors = [
+    "button:has-text('Continue')",
+    "button:has-text('Next')",
+    "button:has-text('Review')",
+    "button:has-text('Confirm')",
+    "button:has-text('Reserve')",
+    "[data-testid*='continue']",
+    "[data-testid*='Continue']",
+  ];
+
+  for (const selector of selectors) {
+    const button = page.locator(selector).first();
+    try {
+      if (await button.isVisible({ timeout: 1000 })) {
+        await button.click({ timeout: 1500 });
+        await page.waitForTimeout(2500);
+        return true;
+      }
+    } catch {
+      // try next selector
+    }
+  }
+
+  return false;
+}
+
+async function determineBookingOutcome(page) {
+  const url = page.url();
+  const bodyText = normalizeMemberMatchValue(await page.locator("body").innerText().catch(() => ""));
+
+  if (/one-time code|log in|login/i.test(bodyText) || url.includes("/profile")) {
+    return {
+      ok: false,
+      status: "paused_login",
+      reason: "Disney asked for a fresh login before the booking attempt could finish.",
+    };
+  }
+
+  if (
+    /reservation confirmed|you're all set|reservation booked|see your plans|view your plans/i.test(bodyText) ||
+    /confirmation|confirm-reservation|reserve\/confirmation/i.test(url)
+  ) {
+    return {
+      ok: true,
+      status: "booked",
+      note: "Disney confirmed the reservation booking attempt.",
+    };
+  }
+
+  if (!url.includes("/entry-reservation/add/select-party/")) {
+    return {
+      ok: true,
+      status: "connected",
+      note: "Booking attempt advanced past Disney's select-party step, but no confirmation screen was detected automatically.",
+    };
+  }
+
+  return {
+    ok: false,
+    status: "paused_mismatch",
+    reason: "Disney did not advance past the select-party step after choosing the targeted Magic Key members.",
+  };
+}
+
 async function createLocalContext(profileDir, headless = false) {
   ensureLocalProfileDir(profileDir);
   return chromium.launchPersistentContext(profileDir, {
@@ -402,6 +537,7 @@ async function handleConnect(job, payload, progress, profileDir) {
       return {
         ok: false,
         status: imported.status,
+        diagnostics: imported.diagnostics,
         lastAuthFailureReason: imported.reason,
         lastRequiredActionMessage: imported.reason,
         note: imported.reason,
@@ -414,6 +550,7 @@ async function handleConnect(job, payload, progress, profileDir) {
       ok: true,
       status: "connected",
       importedDisneyMembers: imported.importedDisneyMembers,
+      diagnostics: imported.diagnostics,
       hasLocalSession: true,
       note: "Connected Disney planner hub and imported connected members from the live select-party flow.",
     };
@@ -432,6 +569,7 @@ async function handleImport(job, payload, progress, profileDir) {
       return {
         ok: false,
         status: imported.status,
+        diagnostics: imported.diagnostics,
         hasLocalSession: imported.status !== "paused_login",
         lastAuthFailureReason: imported.reason,
         lastRequiredActionMessage:
@@ -448,8 +586,157 @@ async function handleImport(job, payload, progress, profileDir) {
       ok: true,
       status: "connected",
       importedDisneyMembers: imported.importedDisneyMembers,
+      diagnostics: imported.diagnostics,
       hasLocalSession: true,
       note: "Imported connected Disney members from the live select-party flow.",
+    };
+  } finally {
+    await context.close();
+  }
+}
+
+async function handleBooking(job, payload, progress, profileDir) {
+  const context = await createLocalContext(profileDir, false);
+  const page = context.pages()[0] || (await context.newPage());
+
+  try {
+    const imported = await scrapeConnectedMembers(page, progress);
+    if (!imported.ok) {
+      return {
+        ok: false,
+        status: imported.status,
+        diagnostics: {
+          ...(imported.diagnostics || {}),
+          targetWatchDate: payload.bookingTarget?.watchDate || "",
+          targetMemberIds: payload.bookingTarget?.selectedMembers?.map((member) => member.id) || [],
+          partySelectionCount: payload.bookingTarget?.selectedMembers?.length || 0,
+        },
+        hasLocalSession: imported.status !== "paused_login",
+        lastAuthFailureReason: imported.reason,
+        lastRequiredActionMessage: imported.reason,
+        note: imported.reason,
+      };
+    }
+
+    const selectedMembers = Array.isArray(payload.bookingTarget?.selectedMembers)
+      ? payload.bookingTarget.selectedMembers.filter((member) => member?.entitlementType === "magic_key" && member?.automatable)
+      : [];
+
+    if (!selectedMembers.length) {
+      return {
+        ok: false,
+        status: "paused_mismatch",
+        diagnostics: {
+          ...(imported.diagnostics || {}),
+          targetWatchDate: payload.bookingTarget?.watchDate || "",
+          targetMemberIds: [],
+          partySelectionCount: 0,
+        },
+        hasLocalSession: true,
+        lastAuthFailureReason: "No eligible imported Magic Key targets were selected for this watched date.",
+        lastRequiredActionMessage: "Choose at least one eligible imported Magic Key member before attempting booking.",
+        note: "No eligible imported Magic Key targets were selected for this watched date.",
+      };
+    }
+
+    const currentMembersByFingerprint = new Map(
+      imported.importedDisneyMembers.map((member) => [
+        `${normalizeMemberMatchValue(member.displayName)}::${normalizeMemberMatchValue(member.passLabel)}`,
+        member,
+      ])
+    );
+    const staleTargets = selectedMembers.filter(
+      (member) =>
+        !currentMembersByFingerprint.has(
+          `${normalizeMemberMatchValue(member.displayName)}::${normalizeMemberMatchValue(member.passLabel)}`
+        )
+    );
+
+    if (staleTargets.length > 0) {
+      return {
+        ok: false,
+        status: "paused_mismatch",
+        diagnostics: {
+          ...(imported.diagnostics || {}),
+          targetWatchDate: payload.bookingTarget?.watchDate || "",
+          targetMemberIds: selectedMembers.map((member) => member.id),
+          partySelectionCount: selectedMembers.length,
+          rejectionReasons: [
+            ...(imported.diagnostics?.rejectionReasons || []),
+            `Selected targets are no longer present: ${staleTargets.map((member) => member.displayName).join(", ")}`,
+          ],
+        },
+        hasLocalSession: true,
+        lastAuthFailureReason: "The selected Magic Key members no longer match Disney's live select-party page.",
+        lastRequiredActionMessage: "Refresh the connected Disney party and reselect the member targets for this watched date.",
+        note: "The selected Magic Key members no longer match Disney's live select-party page.",
+      };
+    }
+
+    const selection = await selectBookingTargetRows(page, selectedMembers);
+    const bookingDiagnostics = {
+      ...(imported.diagnostics || {}),
+      targetWatchDate: payload.bookingTarget?.watchDate || "",
+      targetMemberIds: selectedMembers.map((member) => member.id),
+      partySelectionCount: selection.matchedMembers.length,
+      rejectedMemberCount: (imported.diagnostics?.rejectedMemberCount || 0) + selection.missingMembers.length,
+      rejectionReasons: [
+        ...(imported.diagnostics?.rejectionReasons || []),
+        ...selection.missingMembers.map((member) => `Could not select booking row for ${member.displayName}.`),
+      ],
+      pageUrl: page.url(),
+    };
+
+    if (selection.missingMembers.length > 0) {
+      return {
+        ok: false,
+        status: "paused_mismatch",
+        diagnostics: bookingDiagnostics,
+        hasLocalSession: true,
+        lastAuthFailureReason: "Disney did not expose all of the selected Magic Key targets on the live select-party page.",
+        lastRequiredActionMessage: "Refresh the connected Disney party and reselect the targeted members before trying this booking again.",
+        note: `Disney could not select ${selection.missingMembers.length} targeted Magic Key member(s).`,
+      };
+    }
+
+    await progress(
+      "members_imported",
+      `Matched ${selection.matchedMembers.length} targeted Magic Key member${selection.matchedMembers.length === 1 ? "" : "s"} for ${payload.bookingTarget?.watchDate || "the watched date"}.`
+    );
+
+    const advanced = await clickBookingContinue(page);
+    const outcome = await determineBookingOutcome(page);
+
+    if (!advanced && !outcome.ok) {
+      return {
+        ok: false,
+        status: "paused_mismatch",
+        diagnostics: bookingDiagnostics,
+        hasLocalSession: true,
+        lastAuthFailureReason: "Disney did not expose a continue path after the targeted party members were selected.",
+        lastRequiredActionMessage: "Open the watched date manually and confirm that Disney still offers the next booking step for this party.",
+        note: "Disney did not expose a continue path after the targeted party members were selected.",
+        importedDisneyMembers: imported.importedDisneyMembers,
+      };
+    }
+
+    return {
+      ok: outcome.ok,
+      status: outcome.status,
+      diagnostics: {
+        ...bookingDiagnostics,
+        pageUrl: page.url(),
+      },
+      hasLocalSession: true,
+      importedDisneyMembers: imported.importedDisneyMembers,
+      lastAuthFailureReason: outcome.ok ? "" : outcome.reason,
+      lastRequiredActionMessage:
+        outcome.ok
+          ? ""
+          : outcome.status === "paused_login"
+            ? "Reconnect Disney on the active Mac before retrying this booking attempt."
+            : outcome.reason,
+      note: outcome.ok ? outcome.note : outcome.reason,
     };
   } finally {
     await context.close();
@@ -524,7 +811,9 @@ export async function runWorker({
       result =
         claimed.job.type === "connect"
           ? await handleConnect(claimed.job, claimed.payload, progress, localProfilePath)
-          : await handleImport(claimed.job, claimed.payload, progress, localProfilePath);
+          : claimed.job.type === "booking"
+            ? await handleBooking(claimed.job, claimed.payload, progress, localProfilePath)
+            : await handleImport(claimed.job, claimed.payload, progress, localProfilePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Disney worker failed unexpectedly.";
       result = {

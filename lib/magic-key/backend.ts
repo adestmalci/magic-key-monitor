@@ -79,6 +79,9 @@ type PlannerHubJobRecord = {
   plannerHubId: string;
   assignedDeviceId: string;
   type: DisneyWorkerJobType;
+  targetWatchItemId: string;
+  targetWatchDate: string;
+  targetMemberIds: string[];
   status: DisneyWorkerJobStatus;
   phase: DisneyWorkerPhase;
   disneyEmail: string;
@@ -119,6 +122,13 @@ type PlannerHubClaimResult = {
     disneyEmail: string;
     password: string;
     sessionState: unknown;
+    bookingTarget: {
+      watchItemId: string;
+      watchDate: string;
+      preferredPark: WatchItem["preferredPark"];
+      passType: WatchItem["passType"];
+      selectedMembers: ImportedDisneyMember[];
+    } | null;
   };
   diagnostics: PlannerHubJobDiagnostics;
 } | null;
@@ -181,6 +191,7 @@ const DISNEY_PENDING_PASSWORD_TTL_MS = 1000 * 60 * 15;
 const PLANNER_HUB_JOB_STALE_MS = 1000 * 60 * 10;
 const LOCAL_DEVICE_STALE_MS = 1000 * 60 * 10;
 const LOCAL_WORKER_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const DISNEY_IMPORT_FRESHNESS_MS = 1000 * 60 * 15;
 
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
@@ -263,6 +274,17 @@ function normalizePlannerHubBooking(
 
   if (!next.plannerHubId) {
     next.plannerHubId = "primary";
+  }
+
+  if (
+    next.lastBookingStatus !== "" &&
+    next.lastBookingStatus !== "queued" &&
+    next.lastBookingStatus !== "processing" &&
+    next.lastBookingStatus !== "completed" &&
+    next.lastBookingStatus !== "failed" &&
+    next.lastBookingStatus !== "booked"
+  ) {
+    next.lastBookingStatus = "";
   }
 
   return next;
@@ -435,6 +457,11 @@ function normalizeDisneyWorkerJobDiagnostics(value: unknown): DisneyWorkerJobDia
       ? next.rejectionReasons.filter((item): item is string => typeof item === "string" && Boolean(item))
       : [],
     pageUrl: typeof next.pageUrl === "string" ? next.pageUrl : "",
+    targetWatchDate: typeof next.targetWatchDate === "string" ? next.targetWatchDate : undefined,
+    targetMemberIds: Array.isArray(next.targetMemberIds)
+      ? next.targetMemberIds.filter((item): item is string => typeof item === "string" && Boolean(item))
+      : undefined,
+    partySelectionCount: typeof next.partySelectionCount === "number" ? next.partySelectionCount : undefined,
   };
 }
 
@@ -476,6 +503,11 @@ function normalizePlannerHubJobRecord(value: Partial<PlannerHubJobRecord> | null
       value?.type === "connect" || value?.type === "import" || value?.type === "booking"
         ? value.type
         : "connect",
+    targetWatchItemId: typeof value?.targetWatchItemId === "string" ? value.targetWatchItemId : "",
+    targetWatchDate: typeof value?.targetWatchDate === "string" ? value.targetWatchDate : "",
+    targetMemberIds: Array.isArray(value?.targetMemberIds)
+      ? value.targetMemberIds.filter((item): item is string => typeof item === "string" && Boolean(item))
+      : [],
     status,
     phase,
     disneyEmail: typeof value?.disneyEmail === "string" ? value.disneyEmail : "",
@@ -1061,6 +1093,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       latestDisneyJob: null,
       latestConnectJob: null,
       latestImportJob: null,
+      latestBookingJob: null,
       importedDisneyMembers: [],
       localWorkerDevices: [],
       savedReservationParties: [],
@@ -1104,6 +1137,12 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
     preferences.plannerHubConnection.plannerHubId || "primary",
     "import"
   );
+  const latestBookingJob = getLatestPlannerHubJobForUserByType(
+    state,
+    user.id,
+    preferences.plannerHubConnection.plannerHubId || "primary",
+    "booking"
+  );
   return {
     user: { id: user.id, email: user.email },
     preferences: {
@@ -1119,6 +1158,7 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
     latestDisneyJob: serializePlannerHubJob(latestDisneyJob),
     latestConnectJob: serializePlannerHubJob(latestConnectJob),
     latestImportJob: serializePlannerHubJob(latestImportJob),
+    latestBookingJob: serializePlannerHubJob(latestBookingJob),
     importedDisneyMembers: preferences.importedDisneyMembers,
     localWorkerDevices: getLocalWorkerDevicesForUser(state, user.id).map(({ userId: _userId, ...device }) => device),
     savedReservationParties: preferences.savedReservationParties,
@@ -1462,6 +1502,21 @@ export async function updateWatchItemForUser(
   const preferences = getPreferencesFromState(state, userId);
   item.currentStatus = resolveWatchItemStatus(item, lookup, preferences.importedDisneyMembers);
 
+  if (
+    item.bookingMode === "watch_and_attempt" &&
+    preferences.plannerHubBooking.enabled &&
+    plannerHubReadyForAutoAttempt(preferences, item)
+  ) {
+    try {
+      queuePlannerHubBookingJobInState(state, userId, {
+        watchItemId: item.id,
+        reason: `Disney booking attempt queued for ${item.date}.`,
+      });
+    } catch {
+      // Booking validation problems should not block the watch-item update itself.
+    }
+  }
+
   await writeBackendState(state);
 
   return {
@@ -1583,6 +1638,23 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
       item.currentStatus = nextStatus;
       item.lastCheckedAt = checkedAt;
       item.updatedAt = nowIso;
+
+      if (
+        item.bookingMode === "watch_and_attempt" &&
+        preferences.plannerHubBooking.enabled &&
+        plannerHubReadyForAutoAttempt(preferences, item) &&
+        previousStatus !== nextStatus &&
+        isWatchStatusReservable(nextStatus)
+      ) {
+        try {
+          queuePlannerHubBookingJobInState(state, user.id, {
+            watchItemId: item.id,
+            reason: `Disney booking attempt queued automatically for ${item.date} after the watched date opened up.`,
+          });
+        } catch {
+          // Surface booking readiness in state without failing the sync pass.
+        }
+      }
     }
 
     preferences.lastEvaluatedAt = nowIso;
@@ -1598,6 +1670,16 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
 
 function getPlannerHubSecretRecord(state: BackendState, userId: string, plannerHubId = "primary") {
   return state.plannerHubSecrets.find((item) => item.userId === userId && item.plannerHubId === plannerHubId) ?? null;
+}
+
+function plannerHubReadyForAutoAttempt(preferences: StoredPreferences, item: StoredWatchItem) {
+  return (
+    preferences.plannerHubConnection.status === "connected" &&
+    preferences.plannerHubConnection.hasLocalSession &&
+    preferences.reservationAssist.stepTwoVerified &&
+    item.selectedImportedMemberIds.length > 0 &&
+    isWatchStatusReservable(item.currentStatus)
+  );
 }
 
 function getLocalWorkerDevicesForUser(state: BackendState, userId: string) {
@@ -1720,6 +1802,34 @@ function getLatestPlannerHubJobForUserByType(
   );
 }
 
+function getActivePlannerHubJobForUserByType(
+  state: BackendState,
+  userId: string,
+  plannerHubId: string,
+  type: DisneyWorkerJobType
+) {
+  return (
+    state.plannerHubJobs.find(
+      (job) =>
+        job.userId === userId &&
+        job.plannerHubId === plannerHubId &&
+        job.type === type &&
+        (job.status === "queued" || job.status === "processing")
+    ) ?? null
+  );
+}
+
+function isWatchStatusReservable(status: WatchItem["currentStatus"]) {
+  return status === "either" || status === "dl" || status === "dca";
+}
+
+function isPlannerHubImportFresh(connection: PlannerHubConnectionState) {
+  if (!connection.lastImportFinishedAt || connection.lastImportStatus !== "completed") {
+    return false;
+  }
+  return Date.now() - Date.parse(connection.lastImportFinishedAt) <= DISNEY_IMPORT_FRESHNESS_MS;
+}
+
 function serializePlannerHubJob(job: PlannerHubJobRecord | null): DisneyWorkerJob | null {
   if (!job) return null;
   return {
@@ -1729,6 +1839,9 @@ function serializePlannerHubJob(job: PlannerHubJobRecord | null): DisneyWorkerJo
     type: job.type,
     status: job.status,
     phase: job.phase,
+    targetWatchItemId: job.targetWatchItemId,
+    targetWatchDate: job.targetWatchDate,
+    targetMemberIds: job.targetMemberIds,
     queuedAt: job.queuedAt,
     startedAt: job.startedAt,
     updatedAt: job.updatedAt,
@@ -1865,6 +1978,9 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
     plannerHubId,
     assignedDeviceId: activeDevice?.id || "",
     type: "connect",
+    targetWatchItemId: "",
+    targetWatchDate: "",
+    targetMemberIds: [],
     status: "queued",
     phase: "queued",
     disneyEmail,
@@ -1927,11 +2043,26 @@ export async function queuePlannerHubConnectJob(userId: string, disneyEmail: str
   return job;
 }
 
-export async function queuePlannerHubImportJob(userId: string) {
-  const state = await readBackendState();
+function queuePlannerHubImportJobInState(
+  state: BackendState,
+  userId: string,
+  options: {
+    reason: string;
+    force?: boolean;
+  }
+) {
   const preferences = getPreferencesFromState(state, userId);
   const plannerHubId = preferences.plannerHubConnection.plannerHubId || "primary";
   const activeDevice = getActiveLocalWorkerDevice(state, userId);
+  const existingActiveImport = getActivePlannerHubJobForUserByType(state, userId, plannerHubId, "import");
+
+  if (existingActiveImport) {
+    return existingActiveImport;
+  }
+
+  if (!options.force && isPlannerHubImportFresh(preferences.plannerHubConnection)) {
+    throw new Error("The connected Disney party was refreshed recently enough already.");
+  }
 
   const now = new Date().toISOString();
   const job: PlannerHubJobRecord = {
@@ -1940,6 +2071,9 @@ export async function queuePlannerHubImportJob(userId: string) {
     plannerHubId,
     assignedDeviceId: activeDevice?.id || "",
     type: "import",
+    targetWatchItemId: "",
+    targetWatchDate: "",
+    targetMemberIds: [],
     status: "queued",
     phase: "queued",
     disneyEmail: preferences.plannerHubConnection.disneyEmail || preferences.reservationAssist.plannerHubEmail,
@@ -1950,9 +2084,9 @@ export async function queuePlannerHubImportJob(userId: string) {
     finishedAt: "",
     attempts: 0,
     reportedBy: "",
-    lastMessage: "Disney member import queued and waiting for the worker.",
+    lastMessage: options.reason,
     lastError: "",
-    events: [{ phase: "queued", at: now, message: "Disney member import queued and waiting for the worker." }],
+    events: [{ phase: "queued", at: now, message: options.reason }],
     diagnostics: null,
   };
 
@@ -1963,7 +2097,7 @@ export async function queuePlannerHubImportJob(userId: string) {
       status: "importing",
       latestJobStatus: "queued",
       latestPhase: "queued",
-      latestPhaseMessage: "Disney member import queued and waiting for the worker.",
+      latestPhaseMessage: options.reason,
       latestPhaseAt: now,
       latestJobUpdatedAt: now,
       lastJobId: job.id,
@@ -1976,7 +2110,7 @@ export async function queuePlannerHubImportJob(userId: string) {
       lastImportJobId: job.id,
       lastImportQueuedAt: now,
       lastImportStatus: "queued",
-      lastImportMessage: "Disney member import queued and waiting for the worker.",
+      lastImportMessage: options.reason,
       lastImportError: "",
       activeDeviceId: activeDevice?.id || preferences.plannerHubConnection.activeDeviceId,
       activeDeviceName: activeDevice?.deviceName || preferences.plannerHubConnection.activeDeviceName,
@@ -1988,6 +2122,153 @@ export async function queuePlannerHubImportJob(userId: string) {
     preferences.plannerHubConnection.disneyEmail
   );
 
+  return job;
+}
+
+export async function queuePlannerHubImportJob(userId: string) {
+  const state = await readBackendState();
+  const job = queuePlannerHubImportJobInState(state, userId, {
+    reason: "Disney member import queued and waiting for the worker.",
+    force: true,
+  });
+  await writeBackendState(state);
+  return job;
+}
+
+function queuePlannerHubBookingJobInState(
+  state: BackendState,
+  userId: string,
+  options: {
+    watchItemId: string;
+    reason: string;
+  }
+) {
+  const preferences = getPreferencesFromState(state, userId);
+  const plannerHubId = preferences.plannerHubConnection.plannerHubId || "primary";
+  const watchItem = state.watchItems.find((item) => item.userId === userId && item.id === options.watchItemId) ?? null;
+
+  if (!watchItem) {
+    throw new Error("The watched date for this booking attempt could not be found.");
+  }
+
+  if (!preferences.plannerHubBooking.enabled) {
+    throw new Error("Enable booking mode before queuing automatic booking attempts.");
+  }
+
+  if (!isWatchStatusReservable(watchItem.currentStatus)) {
+    throw new Error("This watched date is not currently reservable for the selected park access.");
+  }
+
+  if (!watchItem.selectedImportedMemberIds.length) {
+    throw new Error("Choose at least one eligible Magic Key member before attempting a booking.");
+  }
+
+  const importedById = new Map(preferences.importedDisneyMembers.map((member) => [member.id, member] as const));
+  const selectedMembers = watchItem.selectedImportedMemberIds
+    .map((id) => importedById.get(id))
+    .filter((member): member is ImportedDisneyMember => Boolean(member));
+
+  if (!selectedMembers.length) {
+    throw new Error("The selected Disney party members are no longer available. Refresh the connected party first.");
+  }
+
+  if (!selectedMembers.every((member) => member.automatable && member.entitlementType === "magic_key")) {
+    throw new Error("Booking attempts can only target imported Magic Key members in this phase.");
+  }
+
+  if (getActivePlannerHubJobForUserByType(state, userId, plannerHubId, "booking")) {
+    throw new Error("A Disney booking attempt is already queued or running.");
+  }
+
+  const activeDevice = getActiveLocalWorkerDevice(state, userId);
+  const now = new Date().toISOString();
+  const job: PlannerHubJobRecord = {
+    id: randomUUID(),
+    userId,
+    plannerHubId,
+    assignedDeviceId: activeDevice?.id || "",
+    type: "booking",
+    targetWatchItemId: watchItem.id,
+    targetWatchDate: watchItem.date,
+    targetMemberIds: selectedMembers.map((member) => member.id),
+    status: "queued",
+    phase: "queued",
+    disneyEmail: preferences.plannerHubConnection.disneyEmail || preferences.reservationAssist.plannerHubEmail,
+    queuedAt: now,
+    claimedAt: "",
+    startedAt: "",
+    updatedAt: now,
+    finishedAt: "",
+    attempts: 0,
+    reportedBy: "",
+    lastMessage: options.reason,
+    lastError: "",
+    events: [{ phase: "queued", at: now, message: options.reason }],
+    diagnostics: {
+      extractedRowCount: 0,
+      acceptedMemberCount: 0,
+      rejectedMemberCount: 0,
+      rejectionReasons: [],
+      pageUrl: "",
+      targetWatchDate: watchItem.date,
+      targetMemberIds: selectedMembers.map((member) => member.id),
+      partySelectionCount: selectedMembers.length,
+    },
+  };
+
+  state.plannerHubJobs.push(job);
+  preferences.plannerHubBooking = normalizePlannerHubBooking({
+    ...preferences.plannerHubBooking,
+    plannerHubId,
+    status: "attempting",
+    lastAttemptedAt: now,
+    lastBookingJobId: job.id,
+    lastBookingQueuedAt: now,
+    lastBookingStatus: "queued",
+    lastBookingMessage: options.reason,
+    lastBookingError: "",
+    lastBookedWatchItemId: watchItem.id,
+    lastResultMessage: options.reason,
+    lastRequiredActionMessage: activeDevice
+      ? `Local Disney worker on ${activeDevice.deviceName} is attempting this reservation.`
+      : "Open the local Disney worker on one of your Macs so it can claim this queued booking attempt.",
+  });
+  preferences.plannerHubConnection = normalizePlannerHubConnection(
+    {
+      ...preferences.plannerHubConnection,
+      latestJobStatus: "queued",
+      latestPhase: "queued",
+      latestPhaseMessage: options.reason,
+      latestPhaseAt: now,
+      latestJobUpdatedAt: now,
+      lastJobId: job.id,
+      lastJobType: "booking",
+      lastQueuedJobId: job.id,
+      lastRequiredActionMessage: preferences.plannerHubBooking.lastRequiredActionMessage,
+    },
+    preferences.plannerHubConnection.disneyEmail
+  );
+
+  return job;
+}
+
+export async function queuePlannerHubBookingJob(
+  userId: string,
+  options: {
+    watchItemId: string;
+    reason?: string;
+  }
+) {
+  const state = await readBackendState();
+  const watchItem = state.watchItems.find((item) => item.userId === userId && item.id === options.watchItemId) ?? null;
+  const job = queuePlannerHubBookingJobInState(state, userId, {
+    watchItemId: options.watchItemId,
+    reason:
+      options.reason ||
+      (watchItem
+        ? `Disney booking attempt queued for ${watchItem.date}.`
+        : "Disney booking attempt queued and waiting for the worker."),
+  });
   await writeBackendState(state);
   return job;
 }
@@ -2143,7 +2424,12 @@ export async function claimNextPlannerHubJobForLocalDevice(
   preferences.plannerHubConnection = normalizePlannerHubConnection(
     {
       ...preferences.plannerHubConnection,
-      status: job.type === "import" ? "importing" : "pending_connect",
+      status:
+        job.type === "import"
+          ? "importing"
+          : job.type === "booking"
+            ? preferences.plannerHubConnection.status
+            : "pending_connect",
       latestJobStatus: "processing",
       latestPhase: "started",
       latestPhaseMessage: `Local worker on ${device.deviceName} started the ${job.type} job.`,
@@ -2170,7 +2456,47 @@ export async function claimNextPlannerHubJobForLocalDevice(
     },
     preferences.plannerHubConnection.disneyEmail
   );
+  preferences.plannerHubBooking = normalizePlannerHubBooking(
+    {
+      ...preferences.plannerHubBooking,
+      status: job.type === "booking" ? "attempting" : preferences.plannerHubBooking.status,
+      lastAttemptedAt: job.type === "booking" ? pollAt : preferences.plannerHubBooking.lastAttemptedAt,
+      lastBookingJobId: job.type === "booking" ? job.id : preferences.plannerHubBooking.lastBookingJobId,
+      lastBookingStartedAt: job.type === "booking" ? pollAt : preferences.plannerHubBooking.lastBookingStartedAt,
+      lastBookingStatus: job.type === "booking" ? "processing" : preferences.plannerHubBooking.lastBookingStatus,
+      lastBookingMessage:
+        job.type === "booking"
+          ? `Local worker on ${device.deviceName} started the booking attempt.`
+          : preferences.plannerHubBooking.lastBookingMessage,
+      lastBookingError: job.type === "booking" ? "" : preferences.plannerHubBooking.lastBookingError,
+      lastBookedWatchItemId: job.type === "booking" ? job.targetWatchItemId : preferences.plannerHubBooking.lastBookedWatchItemId,
+      lastResultMessage:
+        job.type === "booking"
+          ? `Booking attempt started for ${job.targetWatchDate || "the watched date"}.`
+          : preferences.plannerHubBooking.lastResultMessage,
+      lastRequiredActionMessage:
+        job.type === "booking"
+          ? `Local Disney worker on ${device.deviceName} is attempting this reservation now.`
+          : preferences.plannerHubBooking.lastRequiredActionMessage,
+    }
+  );
   const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
+  const bookingTarget =
+    job.type === "booking"
+      ? (() => {
+          const watchItem = state.watchItems.find((item) => item.userId === job.userId && item.id === job.targetWatchItemId) ?? null;
+          const importedById = new Map(preferences.importedDisneyMembers.map((member) => [member.id, member] as const));
+          return {
+            watchItemId: job.targetWatchItemId,
+            watchDate: job.targetWatchDate,
+            preferredPark: watchItem?.preferredPark ?? "either",
+            passType: watchItem?.passType ?? "enchant",
+            selectedMembers: job.targetMemberIds
+              .map((memberId) => importedById.get(memberId))
+              .filter((member): member is ImportedDisneyMember => Boolean(member)),
+          };
+        })()
+      : null;
   await writeBackendState(state);
 
   return {
@@ -2188,6 +2514,7 @@ export async function claimNextPlannerHubJobForLocalDevice(
           ? decryptSensitiveValue(secret.encryptedPendingPassword)
           : "",
       sessionState: null,
+      bookingTarget,
     },
     diagnostics,
   };
@@ -2275,7 +2602,12 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
   preferences.plannerHubConnection = normalizePlannerHubConnection(
     {
       ...preferences.plannerHubConnection,
-      status: job.type === "import" ? "importing" : "pending_connect",
+      status:
+        job.type === "import"
+          ? "importing"
+          : job.type === "booking"
+            ? preferences.plannerHubConnection.status
+            : "pending_connect",
       latestJobStatus: "processing",
       latestPhase: "started",
       latestPhaseMessage: `Worker started the ${job.type} job for ${job.disneyEmail || "the planner hub"}.`,
@@ -2296,7 +2628,47 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
     },
     preferences.plannerHubConnection.disneyEmail
   );
+  preferences.plannerHubBooking = normalizePlannerHubBooking(
+    {
+      ...preferences.plannerHubBooking,
+      status: job.type === "booking" ? "attempting" : preferences.plannerHubBooking.status,
+      lastAttemptedAt: job.type === "booking" ? job.claimedAt : preferences.plannerHubBooking.lastAttemptedAt,
+      lastBookingJobId: job.type === "booking" ? job.id : preferences.plannerHubBooking.lastBookingJobId,
+      lastBookingStartedAt: job.type === "booking" ? job.claimedAt : preferences.plannerHubBooking.lastBookingStartedAt,
+      lastBookingStatus: job.type === "booking" ? "processing" : preferences.plannerHubBooking.lastBookingStatus,
+      lastBookingMessage:
+        job.type === "booking"
+          ? `Disney worker started the booking attempt for ${job.targetWatchDate || "the watched date"}.`
+          : preferences.plannerHubBooking.lastBookingMessage,
+      lastBookingError: job.type === "booking" ? "" : preferences.plannerHubBooking.lastBookingError,
+      lastBookedWatchItemId: job.type === "booking" ? job.targetWatchItemId : preferences.plannerHubBooking.lastBookedWatchItemId,
+      lastResultMessage:
+        job.type === "booking"
+          ? `Booking attempt started for ${job.targetWatchDate || "the watched date"}.`
+          : preferences.plannerHubBooking.lastResultMessage,
+      lastRequiredActionMessage:
+        job.type === "booking"
+          ? "Disney worker is attempting this reservation now."
+          : preferences.plannerHubBooking.lastRequiredActionMessage,
+    }
+  );
   const secret = getPlannerHubSecretRecord(state, job.userId, job.plannerHubId);
+  const bookingTarget =
+    job.type === "booking"
+      ? (() => {
+          const watchItem = state.watchItems.find((item) => item.userId === job.userId && item.id === job.targetWatchItemId) ?? null;
+          const importedById = new Map(preferences.importedDisneyMembers.map((member) => [member.id, member] as const));
+          return {
+            watchItemId: job.targetWatchItemId,
+            watchDate: job.targetWatchDate,
+            preferredPark: watchItem?.preferredPark ?? "either",
+            passType: watchItem?.passType ?? "enchant",
+            selectedMembers: job.targetMemberIds
+              .map((memberId) => importedById.get(memberId))
+              .filter((member): member is ImportedDisneyMember => Boolean(member)),
+          };
+        })()
+      : null;
   await writeBackendState(state);
 
   return {
@@ -2315,6 +2687,7 @@ export async function claimNextPlannerHubJob(): Promise<PlannerHubClaimResult> {
           : "",
       sessionState:
         secret?.encryptedSessionState ? JSON.parse(decryptSensitiveValue(secret.encryptedSessionState)) : null,
+      bookingTarget,
     },
     diagnostics,
   };
@@ -2353,10 +2726,14 @@ export async function reportPlannerHubJobProgress(
         : payload.phase === "completed"
           ? "connected"
           : payload.phase === "failed"
-            ? "failed"
+            ? job.type === "booking"
+              ? preferences.plannerHubConnection.status
+              : "failed"
             : job.type === "import"
               ? "importing"
-            : "pending_connect";
+              : job.type === "booking"
+                ? preferences.plannerHubConnection.status
+                : "pending_connect";
 
   const device = payload.deviceId ? getLocalWorkerDevice(state, job.userId, payload.deviceId) : null;
   if (device) {
@@ -2410,6 +2787,50 @@ export async function reportPlannerHubJobProgress(
     },
     preferences.plannerHubConnection.disneyEmail || job.disneyEmail
   );
+  preferences.plannerHubBooking = normalizePlannerHubBooking(
+    {
+      ...preferences.plannerHubBooking,
+      status:
+        job.type === "booking"
+          ? payload.phase === "paused_login"
+            ? "paused_login"
+            : payload.phase === "paused_mismatch"
+              ? "paused_mismatch"
+              : "attempting"
+          : preferences.plannerHubBooking.status,
+      lastAttemptedAt: job.type === "booking" ? now : preferences.plannerHubBooking.lastAttemptedAt,
+      lastBookingJobId: job.type === "booking" ? job.id : preferences.plannerHubBooking.lastBookingJobId,
+      lastBookingStartedAt:
+        job.type === "booking"
+          ? job.startedAt || now
+          : preferences.plannerHubBooking.lastBookingStartedAt,
+      lastBookingStatus:
+        job.type === "booking"
+          ? payload.phase === "paused_login" || payload.phase === "paused_mismatch"
+            ? "failed"
+            : "processing"
+          : preferences.plannerHubBooking.lastBookingStatus,
+      lastBookingMessage:
+        job.type === "booking" ? payload.message : preferences.plannerHubBooking.lastBookingMessage,
+      lastBookingError:
+        job.type === "booking" && (payload.phase === "paused_login" || payload.phase === "paused_mismatch" || payload.phase === "failed")
+          ? payload.message
+          : job.type === "booking"
+            ? preferences.plannerHubBooking.lastBookingError
+            : preferences.plannerHubBooking.lastBookingError,
+      lastBookedWatchItemId: job.type === "booking" ? job.targetWatchItemId : preferences.plannerHubBooking.lastBookedWatchItemId,
+      lastResultMessage:
+        job.type === "booking" ? payload.message : preferences.plannerHubBooking.lastResultMessage,
+      lastRequiredActionMessage:
+        job.type === "booking" && payload.phase === "paused_login"
+          ? "Disney needs a fresh login or one-time code before the booking attempt can continue."
+          : job.type === "booking" && payload.phase === "paused_mismatch"
+            ? "The connected Disney party or watched-date targeting changed before the booking attempt could continue."
+            : job.type === "booking"
+              ? "Booking attempt is actively running on your Mac."
+              : preferences.plannerHubBooking.lastRequiredActionMessage,
+    }
+  );
 
   state.syncMeta = {
     ...state.syncMeta,
@@ -2424,7 +2845,7 @@ export async function completePlannerHubJob(
   jobId: string,
   payload: {
     ok: boolean;
-    status: DisneyPlannerConnectionStatus;
+    status: DisneyPlannerConnectionStatus | "booked";
     importedDisneyMembers?: ImportedDisneyMember[];
     diagnostics?: DisneyWorkerJobDiagnostics | null;
     encryptedSessionState?: string;
@@ -2459,12 +2880,12 @@ export async function completePlannerHubJob(
     }
   }
   const importCollapsedToZero =
-    job.type === "import" &&
+    (job.type === "import" || job.type === "booking") &&
     payload.ok &&
     rawImportedMembers.length > 0 &&
     importedMembers.length === 0;
   const effectiveOk = importCollapsedToZero ? false : payload.ok;
-  const effectiveStatus: DisneyPlannerConnectionStatus = importCollapsedToZero ? "paused_mismatch" : payload.status;
+  const effectiveStatus: DisneyPlannerConnectionStatus | "booked" = importCollapsedToZero ? "paused_mismatch" : payload.status;
   const effectiveFailureReason = importCollapsedToZero
     ? "All extracted rows were rejected during normalization."
     : payload.lastAuthFailureReason || "";
@@ -2492,6 +2913,8 @@ export async function completePlannerHubJob(
   if (importedMembers.length > 0) {
     preferences.importedDisneyMembers = importedMembers;
   }
+  const shouldRefreshImportSummary =
+    importedMembers.length > 0 && (job.type === "connect" || job.type === "import" || job.type === "booking");
 
   const device = payload.deviceId ? getLocalWorkerDevice(state, job.userId, payload.deviceId) : null;
   if (device) {
@@ -2524,10 +2947,15 @@ export async function completePlannerHubJob(
     {
       ...preferences.plannerHubConnection,
       disneyEmail: job.disneyEmail || preferences.plannerHubConnection.disneyEmail,
-      status: effectiveStatus,
+      status:
+        effectiveStatus === "booked"
+          ? "connected"
+          : effectiveStatus === "failed" && job.type === "booking"
+            ? preferences.plannerHubConnection.status
+            : effectiveStatus,
       latestJobStatus: effectiveOk ? "completed" : "failed",
       latestPhase:
-        effectiveStatus === "connected"
+        effectiveStatus === "connected" || effectiveStatus === "booked"
           ? "completed"
           : effectiveStatus === "paused_login"
             ? "paused_login"
@@ -2541,7 +2969,7 @@ export async function completePlannerHubJob(
         (effectiveOk ? "Disney worker finished successfully." : "Disney worker failed closed."),
       latestPhaseAt: now,
       latestJobUpdatedAt: now,
-      lastImportedAt: importedMembers.length > 0 ? now : preferences.plannerHubConnection.lastImportedAt,
+      lastImportedAt: shouldRefreshImportSummary ? now : preferences.plannerHubConnection.lastImportedAt,
       lastAuthFailureReason: effectiveFailureReason,
       lastRequiredActionMessage: effectiveRequiredActionMessage,
       lastJobId: job.id,
@@ -2553,34 +2981,34 @@ export async function completePlannerHubJob(
       hasLocalSession:
         payload.hasLocalSession ??
         device?.hasLocalSession ??
-        (effectiveStatus === "connected" || preferences.plannerHubConnection.hasLocalSession),
-      importedMemberCount: importedMembers.length > 0 ? importedMembers.length : preferences.importedDisneyMembers.length,
-      lastImportJobId: job.type === "import" ? job.id : preferences.plannerHubConnection.lastImportJobId,
-      lastImportQueuedAt: job.type === "import" ? job.queuedAt : preferences.plannerHubConnection.lastImportQueuedAt,
+        (effectiveStatus === "connected" || effectiveStatus === "booked" || preferences.plannerHubConnection.hasLocalSession),
+      importedMemberCount: shouldRefreshImportSummary ? importedMembers.length : preferences.importedDisneyMembers.length,
+      lastImportJobId: shouldRefreshImportSummary ? job.id : preferences.plannerHubConnection.lastImportJobId,
+      lastImportQueuedAt: shouldRefreshImportSummary ? job.queuedAt : preferences.plannerHubConnection.lastImportQueuedAt,
       lastImportStartedAt:
-        job.type === "import" ? job.startedAt || preferences.plannerHubConnection.lastImportStartedAt : preferences.plannerHubConnection.lastImportStartedAt,
-      lastImportFinishedAt: job.type === "import" ? now : preferences.plannerHubConnection.lastImportFinishedAt,
+        shouldRefreshImportSummary ? job.startedAt || preferences.plannerHubConnection.lastImportStartedAt : preferences.plannerHubConnection.lastImportStartedAt,
+      lastImportFinishedAt: shouldRefreshImportSummary ? now : preferences.plannerHubConnection.lastImportFinishedAt,
       lastImportStatus:
-        job.type === "import"
+        shouldRefreshImportSummary
           ? effectiveOk
             ? "completed"
             : "failed"
           : preferences.plannerHubConnection.lastImportStatus,
       lastImportMessage:
-        job.type === "import"
+        shouldRefreshImportSummary
           ? effectiveNote ||
             effectiveFailureReason ||
             effectiveRequiredActionMessage ||
             (effectiveOk ? `Imported ${importedMembers.length} connected Disney members.` : "Disney import failed.")
           : preferences.plannerHubConnection.lastImportMessage,
       lastImportError:
-        job.type === "import"
+        shouldRefreshImportSummary
           ? effectiveOk
             ? ""
             : effectiveFailureReason || effectiveRequiredActionMessage || effectiveNote
           : preferences.plannerHubConnection.lastImportError,
       lastImportedMemberCount:
-        job.type === "import" ? importedMembers.length : preferences.plannerHubConnection.lastImportedMemberCount,
+        shouldRefreshImportSummary ? importedMembers.length : preferences.plannerHubConnection.lastImportedMemberCount,
       activeDeviceId: device?.id || preferences.plannerHubConnection.activeDeviceId,
       activeDeviceName: device?.deviceName || preferences.plannerHubConnection.activeDeviceName,
       activeDevicePlatform: device?.platform || preferences.plannerHubConnection.activeDevicePlatform,
@@ -2597,7 +3025,7 @@ export async function completePlannerHubJob(
       plannerHubEmail: nextConnection.disneyEmail,
       plannerHubConfirmed: Boolean(nextConnection.disneyEmail),
       sessionStatus:
-        effectiveStatus === "connected"
+        effectiveStatus === "connected" || effectiveStatus === "booked"
           ? "connected"
           : effectiveStatus === "paused_login"
             ? "needs_login"
@@ -2615,10 +3043,83 @@ export async function completePlannerHubJob(
     },
     nextConnection.disneyEmail
   );
+  preferences.plannerHubBooking = normalizePlannerHubBooking(
+    {
+      ...preferences.plannerHubBooking,
+      status:
+        job.type === "booking"
+          ? effectiveStatus === "booked"
+            ? "booked"
+            : effectiveStatus === "paused_login"
+              ? "paused_login"
+              : effectiveStatus === "paused_mismatch"
+                ? "paused_mismatch"
+                : effectiveOk
+                  ? "armed"
+                  : "failed"
+          : preferences.plannerHubBooking.status,
+      lastAttemptedAt: job.type === "booking" ? now : preferences.plannerHubBooking.lastAttemptedAt,
+      lastBookingJobId: job.type === "booking" ? job.id : preferences.plannerHubBooking.lastBookingJobId,
+      lastBookingQueuedAt: job.type === "booking" ? job.queuedAt : preferences.plannerHubBooking.lastBookingQueuedAt,
+      lastBookingStartedAt:
+        job.type === "booking" ? job.startedAt || preferences.plannerHubBooking.lastBookingStartedAt : preferences.plannerHubBooking.lastBookingStartedAt,
+      lastBookingFinishedAt: job.type === "booking" ? now : preferences.plannerHubBooking.lastBookingFinishedAt,
+      lastBookingStatus:
+        job.type === "booking"
+          ? effectiveStatus === "booked"
+            ? "booked"
+            : effectiveOk
+              ? "completed"
+              : "failed"
+          : preferences.plannerHubBooking.lastBookingStatus,
+      lastBookingMessage:
+        job.type === "booking"
+          ? effectiveNote ||
+            effectiveFailureReason ||
+            effectiveRequiredActionMessage ||
+            (effectiveStatus === "booked"
+              ? `Booked ${job.targetWatchDate || "the watched date"}.`
+              : effectiveOk
+                ? "Booking attempt completed."
+                : "Booking attempt failed.")
+          : preferences.plannerHubBooking.lastBookingMessage,
+      lastBookingError:
+        job.type === "booking"
+          ? effectiveOk
+            ? ""
+            : effectiveFailureReason || effectiveRequiredActionMessage || effectiveNote
+          : preferences.plannerHubBooking.lastBookingError,
+      lastBookedWatchItemId: job.type === "booking" ? job.targetWatchItemId || "" : preferences.plannerHubBooking.lastBookedWatchItemId,
+      lastResultMessage:
+        job.type === "booking"
+          ? effectiveStatus === "booked"
+            ? `Reservation booked for ${job.targetWatchDate || "the watched date"}.`
+            : effectiveStatus === "paused_login"
+              ? "Booking attempt paused because Disney needs a fresh login."
+              : effectiveStatus === "paused_mismatch"
+                ? "Booking attempt paused because the connected party or watched-date target changed."
+                : effectiveOk
+                  ? effectiveNote || "Booking attempt completed."
+                  : effectiveFailureReason || effectiveRequiredActionMessage || effectiveNote || "Booking attempt failed."
+          : preferences.plannerHubBooking.lastResultMessage,
+      lastRequiredActionMessage:
+        job.type === "booking"
+          ? effectiveStatus === "paused_login"
+            ? "Reconnect Disney on the active Mac before another booking attempt."
+            : effectiveStatus === "paused_mismatch"
+              ? "Re-import the Disney party or update the selected members for this watched date."
+              : effectiveStatus === "booked"
+                ? ""
+                : effectiveOk
+                  ? "Booking automation is still armed for future watched dates."
+                  : effectiveFailureReason || effectiveRequiredActionMessage || "Review the latest booking attempt before retrying."
+          : preferences.plannerHubBooking.lastRequiredActionMessage,
+    }
+  );
 
   job.status = effectiveOk ? "completed" : "failed";
   job.phase =
-    effectiveStatus === "connected"
+    effectiveStatus === "connected" || effectiveStatus === "booked"
       ? "completed"
       : effectiveStatus === "paused_login"
         ? "paused_login"
@@ -2680,6 +3181,9 @@ export async function getDisneyStatusForUser(user: StoredUser | null) {
   const latestImportJob = user
     ? getLatestPlannerHubJobForUserByType(state, user.id, plannerHubConnection.plannerHubId || "primary", "import")
     : null;
+  const latestBookingJob = user
+    ? getLatestPlannerHubJobForUserByType(state, user.id, plannerHubConnection.plannerHubId || "primary", "booking")
+    : null;
 
   return {
     plannerHubConnection,
@@ -2690,6 +3194,7 @@ export async function getDisneyStatusForUser(user: StoredUser | null) {
     latestDisneyJob: serializePlannerHubJob(latestDisneyJob),
     latestConnectJob: serializePlannerHubJob(latestConnectJob),
     latestImportJob: serializePlannerHubJob(latestImportJob),
+    latestBookingJob: serializePlannerHubJob(latestBookingJob),
   };
 }
 

@@ -98,6 +98,7 @@ export default function Home() {
   const [latestDisneyJob, setLatestDisneyJob] = useState<DisneyWorkerJob | null>(null);
   const [latestConnectJob, setLatestConnectJob] = useState<DisneyWorkerJob | null>(null);
   const [latestImportJob, setLatestImportJob] = useState<DisneyWorkerJob | null>(null);
+  const [latestBookingJob, setLatestBookingJob] = useState<DisneyWorkerJob | null>(null);
   const [importedDisneyMembers, setImportedDisneyMembers] = useState<ImportedDisneyMember[]>([]);
   const [localWorkerDevices, setLocalWorkerDevices] = useState<LocalWorkerDevice[]>([]);
   const [authEmail, setAuthEmail] = useState("");
@@ -197,6 +198,7 @@ export default function Home() {
     setLatestDisneyJob(data.latestDisneyJob || null);
     setLatestConnectJob(data.latestConnectJob || null);
     setLatestImportJob(data.latestImportJob || null);
+    setLatestBookingJob(data.latestBookingJob || null);
     setImportedDisneyMembers(Array.isArray(data.importedDisneyMembers) ? data.importedDisneyMembers : []);
     setLocalWorkerDevices(Array.isArray(data.localWorkerDevices) ? data.localWorkerDevices : []);
 
@@ -226,6 +228,7 @@ export default function Home() {
       setLatestDisneyJob(null);
       setLatestConnectJob(null);
       setLatestImportJob(null);
+      setLatestBookingJob(null);
       setImportedDisneyMembers([]);
       setLocalWorkerDevices([]);
       setAccountSaveState("local");
@@ -904,6 +907,35 @@ export default function Home() {
     [watchItems, prependActivity, pushToast, sessionUser]
   );
 
+  const loadDisneyWorkerStatus = useCallback(async () => {
+    const response = await fetch("/api/disney/status", { cache: "no-store" });
+    if (!response.ok) return;
+
+    const data = await response.json();
+    if (data.syncMeta) {
+      setSyncMeta((current) => ({
+        ...current,
+        ...data.syncMeta,
+      }));
+    }
+    if (data.reservationAssist) {
+      setReservationAssist(data.reservationAssist);
+    }
+    if (data.plannerHubConnection) {
+      setPlannerHubConnection(data.plannerHubConnection);
+    }
+    if (Array.isArray(data.importedDisneyMembers)) {
+      setImportedDisneyMembers(data.importedDisneyMembers);
+    }
+    if (Array.isArray(data.localWorkerDevices)) {
+      setLocalWorkerDevices(data.localWorkerDevices);
+    }
+    setLatestDisneyJob(data.latestDisneyJob || null);
+    setLatestConnectJob(data.latestConnectJob || null);
+    setLatestImportJob(data.latestImportJob || null);
+    setLatestBookingJob(data.latestBookingJob || null);
+  }, []);
+
   const updateWatchItemBooking = useCallback(
     async (
       id: string,
@@ -941,12 +973,14 @@ export default function Home() {
         setWatchItems((current) => current.map((item) => (item.id === id ? data.item : item)));
         setAccountSaveState("saved");
         setAccountSaveMessage(`Wishboard changes are saved to ${sessionUser.email}.`);
+        await loadDashboardState();
+        await loadDisneyWorkerStatus();
         return;
       }
 
       setWatchItems((current) => current.map((item) => (item.id === id ? applyLocal(item) : item)));
     },
-    [feedRows, importedDisneyMembers, pushToast, sessionUser]
+    [feedRows, importedDisneyMembers, loadDashboardState, loadDisneyWorkerStatus, pushToast, sessionUser]
   );
 
   const connectDisneyPlannerHub = useCallback(
@@ -971,12 +1005,8 @@ export default function Home() {
       setAccountSaveState("saved");
       setAccountSaveMessage(`Disney planner hub is queued for ${sessionUser.email}.`);
       await loadDashboardState();
-      pushToast(
-        "success",
-        data.jobId
-          ? `Disney connection queued. Job ${String(data.jobId).slice(0, 8)} is waiting for the worker.`
-          : "Disney connection queued. The worker will capture the session and import connected members."
-      );
+      await loadDisneyWorkerStatus();
+      pushToast("success", "Disney connection queued. Your active Mac will capture the session and refresh the connected party.");
       return data.jobId || true;
     },
     [loadDashboardState, pushToast, sessionUser]
@@ -1016,34 +1046,6 @@ export default function Home() {
     [pushToast, sessionUser]
   );
 
-  const loadDisneyWorkerStatus = useCallback(async () => {
-    const response = await fetch("/api/disney/status", { cache: "no-store" });
-    if (!response.ok) return;
-
-    const data = await response.json();
-    if (data.syncMeta) {
-      setSyncMeta((current) => ({
-        ...current,
-        ...data.syncMeta,
-      }));
-    }
-    if (data.reservationAssist) {
-      setReservationAssist(data.reservationAssist);
-    }
-    if (data.plannerHubConnection) {
-      setPlannerHubConnection(data.plannerHubConnection);
-    }
-    if (Array.isArray(data.importedDisneyMembers)) {
-      setImportedDisneyMembers(data.importedDisneyMembers);
-    }
-    if (Array.isArray(data.localWorkerDevices)) {
-      setLocalWorkerDevices(data.localWorkerDevices);
-    }
-    setLatestDisneyJob(data.latestDisneyJob || null);
-    setLatestConnectJob(data.latestConnectJob || null);
-    setLatestImportJob(data.latestImportJob || null);
-  }, []);
-
   const importConnectedDisneyMembers = useCallback(async () => {
     if (!sessionUser) {
       pushToast("error", "Sign in first so the Disney member import can stay tied to your account.");
@@ -1064,12 +1066,7 @@ export default function Home() {
     setAccountSaveMessage(`Disney import is queued for ${sessionUser.email}.`);
     await loadDashboardState();
     await loadDisneyWorkerStatus();
-    pushToast(
-      "success",
-      data.jobId
-        ? `Disney import queued. Job ${String(data.jobId).slice(0, 8)} is waiting for your Mac.`
-        : "Disney member import queued."
-    );
+    pushToast("success", "Disney member refresh queued. Your active Mac will pull the latest connected party.");
     return data.jobId || true;
   }, [loadDashboardState, loadDisneyWorkerStatus, pushToast, sessionUser]);
 
@@ -1356,6 +1353,7 @@ export default function Home() {
             plannerHubConnection={plannerHubConnection}
             latestConnectJob={latestConnectJob}
             latestImportJob={latestImportJob}
+            latestBookingJob={latestBookingJob}
             importedDisneyMembers={importedDisneyMembers}
             localWorkerDevices={localWorkerDevices}
             syncMeta={syncMeta}

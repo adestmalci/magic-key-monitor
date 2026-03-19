@@ -122,6 +122,14 @@ export type PlannerHubBookingState = {
   enabled: boolean;
   status: PlannerHubBookingStatus;
   lastAttemptedAt: string;
+  lastBookingJobId: string;
+  lastBookingQueuedAt: string;
+  lastBookingStartedAt: string;
+  lastBookingFinishedAt: string;
+  lastBookingStatus: DisneyWorkerJobStatus | "booked" | "";
+  lastBookingMessage: string;
+  lastBookingError: string;
+  lastBookedWatchItemId: string;
   lastResultMessage: string;
   lastRequiredActionMessage: string;
 };
@@ -175,6 +183,9 @@ export type DisneyWorkerJobDiagnostics = {
   rejectedMemberCount: number;
   rejectionReasons: string[];
   pageUrl: string;
+  targetWatchDate?: string;
+  targetMemberIds?: string[];
+  partySelectionCount?: number;
 };
 
 export type DisneyWorkerJob = {
@@ -184,6 +195,9 @@ export type DisneyWorkerJob = {
   type: DisneyWorkerJobType;
   status: DisneyWorkerJobStatus;
   phase: DisneyWorkerPhase;
+  targetWatchItemId?: string;
+  targetWatchDate?: string;
+  targetMemberIds?: string[];
   queuedAt: string;
   startedAt: string;
   updatedAt: string;
@@ -266,6 +280,7 @@ export type DashboardUserState = {
   latestDisneyJob: DisneyWorkerJob | null;
   latestConnectJob: DisneyWorkerJob | null;
   latestImportJob: DisneyWorkerJob | null;
+  latestBookingJob: DisneyWorkerJob | null;
   importedDisneyMembers: ImportedDisneyMember[];
   localWorkerDevices: LocalWorkerDevice[];
   savedReservationParties: SavedReservationParty[];
@@ -300,6 +315,14 @@ export function createDefaultPlannerHubBooking(): PlannerHubBookingState {
     enabled: false,
     status: "idle",
     lastAttemptedAt: "",
+    lastBookingJobId: "",
+    lastBookingQueuedAt: "",
+    lastBookingStartedAt: "",
+    lastBookingFinishedAt: "",
+    lastBookingStatus: "",
+    lastBookingMessage: "",
+    lastBookingError: "",
+    lastBookedWatchItemId: "",
     lastResultMessage: "",
     lastRequiredActionMessage: "",
   };
