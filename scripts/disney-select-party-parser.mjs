@@ -21,106 +21,74 @@ function looksLikeRealMemberName(text) {
   return words.every((word) => /^[A-Za-z'.-]+$/.test(word));
 }
 
-function parseSourceGroup(sectionLabel, passLabel) {
-  const combined = `${sectionLabel || ""} ${passLabel || ""}`;
-  return /Magic Key/i.test(combined) ? "magic_key" : "ticket_holder";
+function parseSourceGroupFromPassLabel(passLabel) {
+  return /ticket/i.test(String(passLabel || "")) ? "ticket_holder" : "magic_key";
 }
 
-export function extractConnectedMembersFromDocument() {
-  const junkPattern =
-    /Footer Links|Visit Disney|Related Disney Sites|Parks\s*&\s*Tickets|Things To Do|Places To Stay|Help|Annual Passports|Tickets\s*&\s*Parks/i;
+function normalizeLines(lines) {
+  return lines
+    .map((line) => String(line || "").trim())
+    .filter(Boolean)
+    .filter((line, index, list) => list.indexOf(line) === index);
+}
 
-  function normalizedLines(node) {
-    const text = (node?.innerText || node?.textContent || "").trim();
-    return text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .filter((line, index, list) => list.indexOf(line) === index);
-  }
-
-  function findSectionLabel(node) {
-    let cursor = node;
-    while (cursor) {
-      let sibling = cursor.previousElementSibling;
-      while (sibling) {
-        const lines = normalizedLines(sibling);
-        const match = lines.find(
-          (line) =>
-            /Magic Key/i.test(line) ||
-            /Ticket Holders?/i.test(line) ||
-            /Theme Park Ticket/i.test(line) ||
-            /^Tickets?$/i.test(line)
-        );
-        if (match && !junkPattern.test(match)) return match;
-        sibling = sibling.previousElementSibling;
-      }
-      cursor = cursor.parentElement;
-    }
-    return "";
-  }
-
-  function validateLines(lines) {
-    const displayName = lines.find((line) => looksLikeRealMemberName(line)) || "";
-    const ageLine = lines.find((line) => /^Age\s*/i.test(line) || /Guest/i.test(line)) || "";
-    const passLabel =
-      lines.find(
-        (line) =>
-          (/Magic Key|Ticket/i.test(line) || /Inspire|Believe|Enchant|Explore|Imagine/i.test(line)) &&
-          !/Reservation/i.test(line) &&
-          !junkPattern.test(line)
-      ) || "";
-
-    return {
-      displayName,
-      ageLine,
-      passLabel,
-      valid: Boolean(displayName && passLabel),
-    };
-  }
-
-  function findRowContainer(node) {
-    let cursor = node;
-    let depth = 0;
-    while (cursor && depth < 8) {
-      const lines = normalizedLines(cursor);
-      const validation = validateLines(lines);
-      if (validation.valid && lines.length <= 20 && !lines.some((line) => junkPattern.test(line))) {
-        return { node: cursor, lines, ...validation, depth };
-      }
-      cursor = cursor.parentElement;
-      depth += 1;
-    }
-    return null;
-  }
-
+export function extractConnectedMembersFromLines(rows) {
   const seen = new Set();
-  return Array.from(document.querySelectorAll('input[type="checkbox"]'))
-    .map((input, index) => {
-      const row = findRowContainer(input);
-      if (!row) return null;
-      const sectionLabel = findSectionLabel(row.node) || row.passLabel;
-      const sourceGroup = parseSourceGroup(sectionLabel, row.passLabel);
-      const rawEligibilityText = row.lines
-        .filter((line) => /Reservation/i.test(line) || /No-Shows?/i.test(line))
-        .join(" • ");
-      const dedupeKey = `${sourceGroup}:${row.displayName.toLowerCase()}:${row.passLabel.toLowerCase()}`;
+  return rows
+    .map((row, index) => {
+      const lines = normalizeLines(Array.isArray(row) ? row : []);
+      if (!lines.length) return null;
+
+      const displayName = lines.find((line) => looksLikeRealMemberName(line)) || "";
+      const ageLine = lines.find((line) => /^Age\s*/i.test(line) || /Guest/i.test(line)) || "";
+      const passLabel =
+        lines.find(
+          (line) =>
+            (/Magic Key|Ticket/i.test(line) || /Inspire|Believe|Enchant|Explore|Imagine/i.test(line)) &&
+            !/Reservation/i.test(line) &&
+            !/Footer Links|Visit Disney|Parks\s*&\s*Tickets|Related Disney Sites/i.test(line)
+        ) || "";
+
+      if (!displayName || !passLabel) return null;
+
+      const sourceGroup = parseSourceGroupFromPassLabel(passLabel);
+      const dedupeKey = `${sourceGroup}:${displayName.toLowerCase()}:${passLabel.toLowerCase()}`;
       if (seen.has(dedupeKey)) return null;
       seen.add(dedupeKey);
 
       return {
-        id: `${sectionLabel || "member"}-${index}`,
-        displayName: row.displayName,
-        ageLine: row.ageLine,
-        entitlementLabel: sectionLabel || "Connected member",
-        rawSectionLabel: sectionLabel || "",
-        passLabel: row.passLabel,
-        rawEligibilityText,
+        id: `member-${index}`,
+        displayName,
+        ageLine,
+        entitlementLabel: sourceGroup === "magic_key" ? "Magic Key Pass" : "Ticket holder",
+        rawSectionLabel: sourceGroup === "magic_key" ? "Magic Key Pass" : "Ticket holder",
+        passLabel,
+        rawEligibilityText: lines
+          .filter((line) => /Reservation/i.test(line) || /No-Shows?/i.test(line))
+          .join(" • "),
         sourceGroup,
-        rawLines: row.lines,
+        rawLines: lines,
       };
     })
     .filter(Boolean);
+}
+
+export async function extractConnectedMembersFromPage(page) {
+  const rowLocator = page.locator(".sectionContainer");
+  const rowCount = await rowLocator.count();
+  const rows = [];
+
+  for (let index = 0; index < rowCount; index += 1) {
+    const text = await rowLocator.nth(index).innerText().catch(() => "");
+    rows.push(
+      text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+    );
+  }
+
+  return extractConnectedMembersFromLines(rows);
 }
 
 export function toImportedDisneyMembers(extractedMembers, plannerHubId = "primary") {

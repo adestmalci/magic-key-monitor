@@ -2,7 +2,7 @@ import { homedir, hostname } from "node:os";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
-import { extractConnectedMembersFromDocument, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
+import { extractConnectedMembersFromPage, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
 
 const DEFAULT_APP_URL = (process.env.MAGIC_KEY_APP_URL || "").replace(/\/$/, "");
 const DEFAULT_LOCAL_WORKER_TOKEN = process.env.MAGIC_KEY_LOCAL_WORKER_TOKEN || "";
@@ -324,7 +324,7 @@ async function scrapeConnectedMembers(page, progress) {
     };
   }
 
-  const members = await page.evaluate(extractConnectedMembersFromDocument);
+  const members = await extractConnectedMembersFromPage(page);
   const validMembers = members.filter((member) => member && member.displayName && member.passLabel);
 
   if (!validMembers.length) {

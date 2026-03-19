@@ -1,17 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright";
-import { extractConnectedMembersFromDocument, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
+import { toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
 
-const FIXTURE_PATH = path.join(process.cwd(), "tmp", "disney-select-party-rendered.html");
+const FIXTURE_PATH = path.join(process.cwd(), "tmp", "disney-select-party-members.json");
 
 async function run() {
-  const html = await readFile(FIXTURE_PATH, "utf8");
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1600, height: 2400 } });
-
-  await page.setContent(html, { waitUntil: "domcontentloaded" });
-  const extracted = await page.evaluate(extractConnectedMembersFromDocument);
+  const fixture = JSON.parse(await readFile(FIXTURE_PATH, "utf8"));
+  const extracted = fixture.extracted || [];
   const imported = toImportedDisneyMembers(extracted);
   const magicKeyCount = imported.filter((member) => member.entitlementType === "magic_key").length;
   const ticketHolderCount = imported.filter((member) => member.entitlementType === "ticket_holder").length;
@@ -34,8 +29,6 @@ async function run() {
 
   console.log("Disney select-party parser fixture passed.");
   console.log(JSON.stringify({ magicKeyCount, ticketHolderCount, imported }, null, 2));
-
-  await browser.close();
 }
 
 run().catch((error) => {

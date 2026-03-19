@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
-import { extractConnectedMembersFromDocument, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
+import { extractConnectedMembersFromPage, toImportedDisneyMembers } from "./disney-select-party-parser.mjs";
 
 const SELECT_PARTY_URL = "https://disneyland.disney.go.com/entry-reservation/add/select-party/";
 const PROFILE_URL = "https://disneyland.disney.go.com/profile/";
@@ -31,16 +31,29 @@ if (currentUrl.includes("/profile")) {
 
 const html = await page.content();
 const text = await page.locator("body").innerText();
-const extracted = await page.evaluate(extractConnectedMembersFromDocument);
+const extracted = await extractConnectedMembersFromPage(page);
 const imported = toImportedDisneyMembers(extracted);
+const shadowSnapshot = await page.evaluate(() => {
+  const host = document.querySelector("tnp-reservations-spa");
+  const root = host?.shadowRoot;
+  return {
+    hostFound: Boolean(host),
+    shadowFound: Boolean(root),
+    shadowHtml: root?.innerHTML || "",
+    shadowText: root?.innerText || root?.textContent || "",
+  };
+});
 
 await writeFile(path.join(OUTPUT_DIR, "disney-select-party-rendered.html"), html, "utf8");
 await writeFile(path.join(OUTPUT_DIR, "disney-select-party-rendered.txt"), text, "utf8");
+await writeFile(path.join(OUTPUT_DIR, "disney-select-party-shadow.html"), shadowSnapshot.shadowHtml, "utf8");
+await writeFile(path.join(OUTPUT_DIR, "disney-select-party-shadow.txt"), shadowSnapshot.shadowText, "utf8");
 await writeFile(
   path.join(OUTPUT_DIR, "disney-select-party-members.json"),
   JSON.stringify(
     {
       url: currentUrl,
+      shadowFound: shadowSnapshot.shadowFound,
       extracted,
       imported,
     },
@@ -54,6 +67,8 @@ await page.screenshot({ path: path.join(OUTPUT_DIR, "disney-select-party-rendere
 console.log("Saved:");
 console.log("  tmp/disney-select-party-rendered.html");
 console.log("  tmp/disney-select-party-rendered.txt");
+console.log("  tmp/disney-select-party-shadow.html");
+console.log("  tmp/disney-select-party-shadow.txt");
 console.log("  tmp/disney-select-party-members.json");
 console.log("  tmp/disney-select-party-rendered.png");
 
