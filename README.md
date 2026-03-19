@@ -4,7 +4,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 This project is set up to keep the website on Vercel while running background watchlist syncs from `cron-job.org`.
 
-Use `cron-job.org` to hit the deployed scheduler endpoint every 5 minutes:
+Use `cron-job.org` to hit the deployed scheduler endpoint every minute:
 
 - URL
   - `https://your-app.vercel.app/api/cron/sync`
@@ -21,7 +21,7 @@ The app route accepts either:
 `cron-job.org` supports arbitrary custom headers, so the simplest setup is:
 
 1. Create a job in `cron-job.org`
-2. Set it to run every 5 minutes
+2. Set it to run every minute
 3. Point it at `https://your-app.vercel.app/api/cron/sync`
 4. Add header `x-cron-secret` with the same `CRON_SECRET` value used by the app on Vercel
 
@@ -39,10 +39,30 @@ If `cron-job.org` stops before the request reaches the backend, the app will kee
 
 ### Recommended cron-job.org settings
 
-- Frequency: every 5 minutes
+- Frequency: every minute
 - Timeout: leave the default unless you have a reason to change it
 - Follow redirects: enabled
 - Notifications: enabled for failures
+
+### Why the scheduler should run every minute
+
+The app supports user-level check cadences such as:
+
+- `1 minute`
+- `5 minutes`
+- `10 minutes`
+- `15 minutes`
+- `Manual only`
+
+The scheduler heartbeat should therefore run every minute, and the backend will decide whether each signed-in user's watchlist is actually due for evaluation.
+
+That means:
+
+- users set to `1 minute` can be evaluated on time
+- users set to `5 minutes`, `10 minutes`, or `15 minutes` are naturally skipped until due
+- users set to `Manual only` are never auto-evaluated
+
+So `cron-job.org` is the background heartbeat for the watchlist/calendar sync system, not a separate Disney worker scheduler.
 
 ### What success looks like
 
