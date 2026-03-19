@@ -1585,37 +1585,6 @@ export function ReservationAssistSection({
 
                 {currentTarget && (
                   <div className="mt-4 space-y-4">
-                    {currentTarget.preferredPark === "either" && (
-                      <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-4">
-                        <div className="text-sm font-semibold text-zinc-900">When both parks are open</div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {[
-                            { value: "dl" as const, label: "Disneyland first" },
-                            { value: "dca" as const, label: "California Adventure first" },
-                          ].map((option) => (
-                            <button
-                              key={option.value}
-                              type="button"
-                              onClick={() =>
-                                onWatchItemBookingChange(currentTarget.id, {
-                                  plannerHubId: plannerHubConnection.plannerHubId || "primary",
-                                  eitherParkTieBreaker: option.value,
-                                })
-                              }
-                              className={classNames(
-                                "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition",
-                                currentTarget.eitherParkTieBreaker === option.value
-                                  ? "border-violet-300 bg-violet-50 text-violet-900"
-                                  : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300"
-                              )}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
                     {magicKeyTargetRows.length === 0 ? (
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
                         Import the connected Disney party first so you can choose Magic Key targets for this watched date.
