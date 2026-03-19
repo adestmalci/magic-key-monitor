@@ -419,7 +419,7 @@ async function createLocalContext(profileDir, headless = false) {
 }
 
 async function handleConnect(job, payload, progress, profileDir) {
-  const context = await createLocalContext(profileDir, true);
+  const context = await createLocalContext(profileDir, false);
   const page = context.pages()[0] || (await context.newPage());
 
   try {
@@ -484,7 +484,7 @@ async function handleConnect(job, payload, progress, profileDir) {
 }
 
 async function handleImport(job, payload, progress, profileDir) {
-  const context = await createLocalContext(profileDir, true);
+  const context = await createLocalContext(profileDir, false);
   const page = context.pages()[0] || (await context.newPage());
 
   try {
