@@ -395,7 +395,7 @@ async function scrapeConnectedMembers(page, progress) {
             !/Reservation/i.test(line) &&
             !junkPattern.test(line)
         ) || "";
-      return { displayName, ageLine, passLabel, valid: Boolean(displayName && ageLine && passLabel) };
+      return { displayName, ageLine, passLabel, valid: Boolean(displayName && passLabel) };
     }
 
     function findRowContainer(node) {
@@ -404,7 +404,7 @@ async function scrapeConnectedMembers(page, progress) {
       while (cursor && depth < 8) {
         const lines = normalizedLines(cursor);
         const validation = isValidRow(lines);
-        if (validation.valid && lines.length <= 12 && !lines.some((line) => junkPattern.test(line))) {
+        if (validation.valid && lines.length <= 20 && !lines.some((line) => junkPattern.test(line))) {
           return { node: cursor, lines, ...validation };
         }
         cursor = cursor.parentElement;
@@ -436,7 +436,7 @@ async function scrapeConnectedMembers(page, progress) {
   });
 
   const validMembers = members.filter(
-    (member) => member && member.displayName && member.passLabel && member.ageLine
+    (member) => member && member.displayName && member.passLabel
   );
 
   if (!validMembers.length) {

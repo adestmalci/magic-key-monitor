@@ -657,6 +657,7 @@ export function ReservationAssistSection({
             </div>
           )}
 
+          {(!minimalConnectedState || showExpandedTimeline) && (
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
             <div className="flex items-center justify-between gap-3">
               <div className="font-semibold text-zinc-900">Disney connection progress</div>
@@ -708,13 +709,6 @@ export function ReservationAssistSection({
                   </div>
                 )}
               </div>
-            ) : effectiveConnectionStatus === "connected" ? (
-              <div className="mt-3 rounded-2xl border border-emerald-200 bg-white px-4 py-4 text-sm text-zinc-700">
-                <div className="font-semibold text-zinc-900">Connected and ready</div>
-                <p className="mt-2 leading-6">
-                  The active Mac has a working Disney session. Import connected members whenever you want to refresh the party, then choose who each watched date should target.
-                </p>
-              </div>
             ) : (
               <div className="mt-3 rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-4 text-sm leading-6 text-zinc-600">
                 No Disney connect attempt is in flight right now. Pair the Mac once, then use the connect button when you want the local worker to take over.
@@ -734,6 +728,7 @@ export function ReservationAssistSection({
               </details>
             )}
           </div>
+          )}
 
           {!sessionUser && (
             <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
