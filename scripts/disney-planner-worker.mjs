@@ -223,19 +223,33 @@ async function fillFirst(page, selectors, value) {
 }
 
 async function gotoWithRetry(page, url, label) {
-  const waits = ["domcontentloaded", "load", "commit"];
+  const waits = [
+    { waitUntil: "commit", timeout: 45000 },
+    { waitUntil: "domcontentloaded", timeout: 30000 },
+    { waitUntil: "load", timeout: 30000 },
+  ];
   let lastError = null;
 
   for (let index = 0; index < waits.length; index += 1) {
     try {
-      await page.goto(url, { waitUntil: waits[index], timeout: 120000 });
+      const strategy = waits[index];
+      await page.goto(url, { waitUntil: strategy.waitUntil, timeout: strategy.timeout });
+
+      // Disney pages can hang forever on later load events even after the navigation
+      // has already committed to the correct destination. Treat a committed page as
+      // good enough and only best-effort the later load state.
+      try {
+        await page.waitForLoadState("domcontentloaded", { timeout: 5000 });
+      } catch {
+        // Keep going; the page may still be usable even if Disney never settles.
+      }
       return;
     } catch (error) {
       lastError = error;
       log("navigation retry", {
         label,
         url,
-        waitUntil: waits[index],
+        waitUntil: waits[index].waitUntil,
         error: error instanceof Error ? error.message : String(error),
       });
       await page.waitForTimeout(1500 * (index + 1));
@@ -396,7 +410,7 @@ async function scrapeConnectedMembers(page, progress) {
   return { ok: true, importedDisneyMembers };
 }
 
-async function createLocalContext(profileDir, headless = true) {
+async function createLocalContext(profileDir, headless = false) {
   ensureLocalProfileDir(profileDir);
   return chromium.launchPersistentContext(profileDir, {
     headless,
@@ -409,7 +423,30 @@ async function handleConnect(job, payload, progress, profileDir) {
   const page = context.pages()[0] || (await context.newPage());
 
   try {
-    const login = await maybeLogin(page, payload.disneyEmail, payload.password, progress);
+    let login = { ok: true };
+
+    if (payload.password) {
+      login = await maybeLogin(page, payload.disneyEmail, payload.password, progress);
+    } else {
+      await progress("disney_open", "Opening Disney profile with the local session on this Mac.");
+      await gotoWithRetry(page, PROFILE_URL, "Disney profile");
+      await page.waitForTimeout(1500);
+
+      const stillNeedsLogin =
+        page.url().includes("/profile") &&
+        ((await page.locator('input[type="password"]').count().catch(() => 0)) > 0 ||
+          (await page.locator('input[type="email"]').count().catch(() => 0)) > 0 ||
+          (await page.locator("text=/one-time code/i").count().catch(() => 0)) > 0);
+
+      if (stillNeedsLogin) {
+        login = {
+          ok: false,
+          status: "paused_login",
+          reason: "This Mac still needs a live Disney sign-in before it can continue.",
+        };
+      }
+    }
+
     if (!login.ok) {
       return {
         ok: false,
