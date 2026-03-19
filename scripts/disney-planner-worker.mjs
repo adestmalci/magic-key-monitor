@@ -319,6 +319,18 @@ function parsePassType(text) {
   return "";
 }
 
+function looksLikeRealMemberName(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (value.length > 80) return false;
+  if (/[_{}\[\];]/.test(value)) return false;
+  if (/function\s*\(|_satellite|querySelector|setTimeout|return\s*\(/i.test(value)) return false;
+  if (/Magic Key|Ticket|Reservation|No-Shows?|View Details|Related Disney Sites|Age\s*\d/i.test(value)) return false;
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  return words.every((word) => /^[A-Za-z'.-]+$/.test(word));
+}
+
 async function scrapeConnectedMembers(page, progress) {
   await progress("select_party", "Opening Disney select-party to import connected members.");
   await gotoWithRetry(page, SELECT_PARTY_URL, "Disney select-party");
@@ -363,8 +375,7 @@ async function scrapeConnectedMembers(page, progress) {
     return inputs.map((input, index) => {
       const lines = extractLines(input);
       const heading = headingFor(input);
-      const displayName =
-        lines.find((line) => !/^Age/i.test(line) && !/Reservation/i.test(line) && !/No-Shows?/i.test(line) && !/View Details/i.test(line)) || "";
+      const displayName = lines.find((line) => looksLikeRealMemberName(line)) || "";
       const passLabel =
         lines.find((line) => /Key Pass|Ticket/i.test(line) && !/Reservation/i.test(line)) || "";
       const rawEligibilityText = lines
@@ -381,7 +392,9 @@ async function scrapeConnectedMembers(page, progress) {
     });
   });
 
-  if (!members.length) {
+  const validMembers = members.filter((member) => member.displayName && member.passLabel);
+
+  if (!validMembers.length) {
     return {
       ok: false,
       status: "paused_mismatch",
@@ -389,7 +402,7 @@ async function scrapeConnectedMembers(page, progress) {
     };
   }
 
-  const importedDisneyMembers = members.map((member) => {
+  const importedDisneyMembers = validMembers.map((member) => {
     const entitlementType = /Magic Key/i.test(member.entitlementLabel) ? "magic_key" : "ticket_holder";
     const magicKeyPassType = entitlementType === "magic_key" ? parsePassType(member.passLabel) : "";
     return {
