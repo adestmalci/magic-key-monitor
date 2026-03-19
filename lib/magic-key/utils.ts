@@ -1,4 +1,4 @@
-import type { FeedRow, ImportedDisneyMember, ParkTieBreaker, StatusType, SyncMeta, WatchItem } from "./types";
+import type { FeedRow, ImportedDisneyMember, ParkTieBreaker, SchedulerHealth, StatusType, SyncMeta, WatchItem } from "./types";
 
 export type CalendarCell = {
   date: string;
@@ -242,6 +242,35 @@ export function syncMetaFromHeaders(headers: Headers): SyncMeta {
     message: headers.get("X-Magic-Key-Status") || "Pixie dust is standing by for the next live sync.",
     lastError: "",
   };
+}
+
+export function deriveSchedulerHealth(
+  syncMeta: Pick<SyncMeta, "lastBackgroundRunAt">,
+  now = Date.now()
+): SchedulerHealth {
+  if (!syncMeta.lastBackgroundRunAt) return "never_seen";
+
+  const heartbeatAt = Date.parse(syncMeta.lastBackgroundRunAt);
+  if (!Number.isFinite(heartbeatAt)) return "never_seen";
+
+  const ageMs = now - heartbeatAt;
+  if (ageMs <= 1000 * 60 * 12) return "healthy";
+  if (ageMs <= 1000 * 60 * 60) return "delayed";
+  return "stale";
+}
+
+export function schedulerHealthLabel(health: SchedulerHealth) {
+  if (health === "healthy") return "Healthy";
+  if (health === "delayed") return "Delayed";
+  if (health === "stale") return "Stale";
+  return "Not seen yet";
+}
+
+export function schedulerHealthTone(health: SchedulerHealth) {
+  if (health === "healthy") return "text-emerald-700";
+  if (health === "delayed") return "text-amber-700";
+  if (health === "stale") return "text-rose-700";
+  return "text-zinc-500";
 }
 
 export function urlBase64ToUint8Array(base64String: string) {

@@ -1,5 +1,11 @@
 import type { SyncMeta, TabKey } from "../../lib/magic-key/types";
-import { classNames, formatSyncTime } from "../../lib/magic-key/utils";
+import {
+  classNames,
+  deriveSchedulerHealth,
+  formatSyncTime,
+  schedulerHealthLabel,
+  schedulerHealthTone,
+} from "../../lib/magic-key/utils";
 
 export function TabsNav({
   activeTab,
@@ -16,12 +22,15 @@ export function TabsNav({
 }) {
   const liveCalendarAt = syncMeta.lastAttemptedSyncAt || lastSyncAt;
   const schedulerAt = syncMeta.lastBackgroundRunAt;
-  const schedulerLagMs = schedulerAt ? Date.now() - new Date(schedulerAt).getTime() : Number.POSITIVE_INFINITY;
-  const schedulerTone = !schedulerAt
-    ? "text-zinc-500"
-    : schedulerLagMs <= 1000 * 60 * 12
-      ? "text-emerald-700"
-      : "text-amber-700";
+  const schedulerHealth = deriveSchedulerHealth(syncMeta);
+  const schedulerTone = schedulerHealthTone(schedulerHealth);
+  const schedulerLabel = schedulerHealthLabel(schedulerHealth);
+  const schedulerValue =
+    schedulerHealth === "healthy"
+      ? formatSyncTime(schedulerAt)
+      : schedulerHealth === "never_seen"
+        ? "Not seen yet"
+        : `${schedulerLabel} • ${formatSyncTime(schedulerAt)}`;
 
   return (
     <section className="rounded-[28px] border border-zinc-200 bg-white px-4 py-3 shadow-sm">
@@ -47,9 +56,12 @@ export function TabsNav({
             <span className="font-semibold text-zinc-900">Live Calendar:</span>
             <span>{formatSyncTime(liveCalendarAt)}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-2"
+            title={schedulerAt ? `Background scheduler last heartbeat ${formatSyncTime(schedulerAt)}` : "Background scheduler has not been seen yet"}
+          >
             <span className="font-semibold text-zinc-900">Auto Scheduler:</span>
-            <span className={schedulerTone}>{schedulerAt ? formatSyncTime(schedulerAt) : "Not seen yet"}</span>
+            <span className={schedulerTone}>{schedulerValue}</span>
           </div>
         </div>
       </div>

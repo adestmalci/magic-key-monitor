@@ -65,9 +65,21 @@ export async function GET(request: Request) {
     try {
       const { readBackendState, writeBackendState } = await import("../../../../lib/magic-key/backend");
       const state = await readBackendState();
+      const failureAt = new Date().toISOString();
+
+      for (const user of state.users) {
+        recordActivityForUser(state, user.id, {
+          source: "auto",
+          trigger: "Background scheduler (~5-minute cadence)",
+          message: "Wishboard auto-refresh failed before the latest scheduler run could complete.",
+          details: [message],
+          createdAt: failureAt,
+        });
+      }
+
       state.syncMeta = {
         ...state.syncMeta,
-        lastBackgroundRunAt: new Date().toISOString(),
+        lastBackgroundRunAt: failureAt,
         lastBackgroundRunMessage: `Background scheduler failed: ${message}`,
       };
       await writeBackendState(state);

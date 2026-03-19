@@ -273,6 +273,8 @@ export type SyncMeta = {
   lastError: string;
 };
 
+export type SchedulerHealth = "never_seen" | "healthy" | "delayed" | "stale";
+
 export type DashboardUserState = {
   user: SessionUser | null;
   preferences: UserPreferences;

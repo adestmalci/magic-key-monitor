@@ -13,6 +13,12 @@ Add these GitHub repository secrets before enabling the workflow:
 
 The workflow file lives at [`.github/workflows/sync-magic-key.yml`](./.github/workflows/sync-magic-key.yml).
 
+The scheduler is considered healthy only when GitHub Actions actually reaches:
+
+- `GET /api/cron/sync`
+
+If the workflow stops before the request reaches the backend, the app will keep showing the last recorded scheduler heartbeat until it becomes delayed or stale.
+
 ## Disney Worker Setup (Local macOS)
 
 Disney connect/import now targets a local macOS worker instead of GitHub Actions.
