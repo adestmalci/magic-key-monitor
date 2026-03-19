@@ -1437,10 +1437,10 @@ export function ReservationAssistSection({
             </span>
           </div>
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+          <div className="mt-4 space-y-4">
             <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-4 py-4">
               <div className="text-sm font-semibold text-zinc-900">Magic Key members</div>
-              <div className="mt-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
+              <div className="mt-3 grid gap-3 xl:grid-cols-2">
                 {magicKeyMembers.length === 0 ? (
                   <p className="text-sm text-zinc-500">No imported Magic Key members yet.</p>
                 ) : (
@@ -1454,8 +1454,8 @@ export function ReservationAssistSection({
                       >
                         <div className="flex items-center gap-4">
                           {passMeta ? (
-                            <div className={classNames("flex h-16 w-16 shrink-0 items-center justify-center rounded-[22px] bg-gradient-to-br to-white ring-1 ring-violet-100", passMeta.accent, "from-white/70")}>
-                              <PassIcon passType={passMeta.id} size="h-9 w-9" />
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-violet-100 bg-violet-50">
+                              <PassIcon passType={passMeta.id} size="h-7 w-7" />
                             </div>
                           ) : null}
                           <div className="min-w-0 flex-1">
@@ -1463,7 +1463,7 @@ export function ReservationAssistSection({
                               <div className="text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</div>
                               {passMeta ? (
                                 <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
-                                  {passMeta.name}
+                                  {passMeta.short} Key
                                 </span>
                               ) : null}
                             </div>
@@ -1519,7 +1519,7 @@ export function ReservationAssistSection({
                     <select
                       value={currentTarget?.id ?? ""}
                       onChange={(event) => setTargetWatchId(event.target.value)}
-                      className="w-full min-w-[320px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
+                      className="w-full min-w-[360px] rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
                     >
                       {watchItems.map((item) => {
                         const passName = PASS_TYPES.find((pass) => pass.id === item.passType)?.name ?? item.passType;
@@ -1536,14 +1536,14 @@ export function ReservationAssistSection({
                     onClick={handleToggleAutoBooking}
                     disabled={!currentTarget}
                     className={classNames(
-                      "inline-flex h-12 items-center justify-center gap-2 rounded-2xl px-5 text-sm font-semibold transition lg:min-w-[220px]",
+                      "inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition lg:min-w-[210px]",
                       targetAutoBookingEnabled
                         ? "border border-violet-200 bg-violet-600 text-white"
                         : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50",
                       !currentTarget ? "cursor-not-allowed opacity-50" : ""
                     )}
                   >
-                    {targetAutoBookingEnabled ? "Turn off auto booking" : "Turn on auto booking"}
+                    {targetAutoBookingEnabled ? "Auto booking on" : "Turn on auto booking"}
                   </button>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-zinc-600">{watchTargetStatus.message}</p>
@@ -1555,7 +1555,7 @@ export function ReservationAssistSection({
                         Import the connected Disney party first so you can choose Magic Key targets for this watched date.
                       </div>
                     ) : (
-                      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
+                      <div className="grid gap-3 xl:grid-cols-2">
                         {magicKeyTargetRows.map(({ member, eligibility, selected }) => {
                           const disabled = !eligibility.eligible && !selected;
                           const passMeta = passMetaForMember(member);
@@ -1590,8 +1590,8 @@ export function ReservationAssistSection({
                               <span className="min-w-0 flex-1">
                                 <span className="flex items-center gap-3">
                                   {passMeta ? (
-                                    <span className={classNames("flex h-16 w-16 shrink-0 items-center justify-center rounded-[22px] bg-gradient-to-br to-white ring-1 ring-violet-100", passMeta.accent, "from-white/70")}>
-                                      <PassIcon passType={passMeta.id} size="h-9 w-9" />
+                                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-violet-100 bg-violet-50">
+                                      <PassIcon passType={passMeta.id} size="h-7 w-7" />
                                     </span>
                                   ) : null}
                                   <span className="min-w-0 flex-1">
@@ -1599,7 +1599,7 @@ export function ReservationAssistSection({
                                       <span className="block text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</span>
                                       {passMeta ? (
                                         <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800">
-                                          {passMeta.name}
+                                          {passMeta.short} Key
                                         </span>
                                       ) : null}
                                     </span>
