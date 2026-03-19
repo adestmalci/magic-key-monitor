@@ -389,9 +389,12 @@ export function ReservationAssistSection({
   const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestDisneyJob);
   const currentConnectionMeta = connectionTone[effectiveConnectionStatus];
   const currentBookingMeta = bookingMeta[plannerHubBooking.status];
-  const latestQueueAt = latestDisneyJob?.queuedAt || reservationAssist.lastVerifiedAt;
   const activeDisneyJob =
     effectiveConnectionStatus === "pending_connect" || effectiveConnectionStatus === "importing";
+  const hasTerminalFailure =
+    effectiveConnectionStatus === "failed" ||
+    effectiveConnectionStatus === "paused_login" ||
+    effectiveConnectionStatus === "paused_mismatch";
   const connectionTimeline = livePhaseOrder.map((phase) => {
     const event = latestDisneyJob?.events.find((entry) => entry.phase === phase);
     return {
@@ -407,41 +410,18 @@ export function ReservationAssistSection({
     latestDisneyJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
     latestDisneyJob?.events.find((entry) => entry.phase === "failed") ||
     null;
-  const connectionSteps = [
-    {
-      label: "Request queued",
-      complete: Boolean(latestQueueAt),
-      detail: latestQueueAt ? `Queued ${formatSyncTime(latestQueueAt)}` : "Queue a Disney connect request first.",
-    },
-    {
-      label: "Worker started",
-      complete: Boolean(latestDisneyJob?.startedAt),
-      detail: latestDisneyJob?.startedAt
-        ? `${formatSyncTime(latestDisneyJob.startedAt)} • ${latestDisneyJob.lastMessage || "Worker started the Disney job."}`
-        : "The dedicated Disney worker has not started this planner-hub job yet.",
-    },
-    {
-      label: "Encrypted session",
-      complete: plannerHubConnection.hasEncryptedSession,
-      detail: plannerHubConnection.hasEncryptedSession
-        ? "Disney session state was captured and stored encrypted."
-        : "Disney session has not been captured yet.",
-    },
-    {
-      label: "Members imported",
-      complete: plannerHubConnection.importedMemberCount > 0,
-      detail:
-        plannerHubConnection.importedMemberCount > 0
-          ? `${plannerHubConnection.importedMemberCount} connected Disney members imported.`
-          : "No connected Disney members imported yet.",
-    },
-  ];
   const latestFailureMessage =
     latestDisneyJob?.lastError ||
     latestDisneyJob?.lastMessage ||
     plannerHubConnection.lastAuthFailureReason ||
     plannerHubConnection.lastRequiredActionMessage ||
     "";
+  const latestWorkerMessage =
+    latestDisneyJob?.lastMessage ||
+    plannerHubConnection.lastRequiredActionMessage ||
+    (plannerHubConnection.hasLocalSession
+      ? "The active Mac has a device-local Disney session ready for connect attempts."
+      : "Pair a local Mac and sign into Disney there before you try to connect.");
   const claimedJobValue =
     plannerHubConnection.lastClaimedJobId ||
     (latestDisneyJob?.startedAt ? latestDisneyJob.id : "") ||
@@ -463,6 +443,20 @@ export function ReservationAssistSection({
         : "No worker result recorded yet",
     },
   ];
+  const nextTimelineStep = connectionTimeline.find((step) => !step.complete) || null;
+  const visibleTimeline =
+    connectionTimeline.filter((step) => step.complete).concat(activeDisneyJob && nextTimelineStep ? [nextTimelineStep] : []);
+  const showPairingSection = !activeLocalDevice || Boolean(pairToken);
+  const shouldShowDiagnostics =
+    hasTerminalFailure ||
+    activeDisneyJob ||
+    Boolean(plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastClaimedJobId || plannerHubConnection.lastReportedJobId);
+  const summarizedActionMessage =
+    plannerHubConnection.lastRequiredActionMessage &&
+    plannerHubConnection.lastRequiredActionMessage !== latestWorkerMessage &&
+    !plannerHubConnection.lastRequiredActionMessage.includes("claim this Disney connect job")
+      ? plannerHubConnection.lastRequiredActionMessage
+      : "";
 
   function stampVerification(patch: Partial<ReservationAssistState>) {
     onReservationAssistChange({
@@ -624,6 +618,7 @@ export function ReservationAssistSection({
                 ? `Last backend update ${formatSyncTime(plannerHubConnection.latestJobUpdatedAt)}`
                 : "Waiting for the next Disney worker update."}
             </p>
+            <p className="mt-2 text-xs leading-5 text-zinc-700">{latestWorkerMessage}</p>
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -649,7 +644,7 @@ export function ReservationAssistSection({
 
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
             <div className="flex items-center justify-between gap-3">
-              <div className="font-semibold text-zinc-900">Disney connection timeline</div>
+              <div className="font-semibold text-zinc-900">Disney connection progress</div>
               <div className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700">
                 {activeDisneyJob
                   ? "Live polling"
@@ -658,37 +653,20 @@ export function ReservationAssistSection({
                     : "No active Disney job"}
               </div>
             </div>
-            <div className="mt-3 space-y-3">
-              {connectionSteps.map((step) => (
-                <div key={step.label} className="flex items-start gap-3">
-                  <div
-                    className={classNames(
-                      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
-                      step.complete
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-zinc-200 bg-white text-zinc-400"
-                    )}
-                  >
-                    {step.complete ? <CheckCircle2 className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  </div>
-                  <div>
-                    <div className="font-medium text-zinc-900">{step.label}</div>
-                    <p className="mt-1 leading-6 text-zinc-600">{step.detail}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Live progress</div>
-              <div className="mt-3 space-y-3">
-                {connectionTimeline.map((step) => (
+            {visibleTimeline.length > 0 ? (
+              <div className="mt-3 space-y-3 rounded-2xl border border-zinc-200 bg-white px-4 py-4">
+                {visibleTimeline.map((step) => {
+                  const isCurrent = !step.complete && nextTimelineStep?.phase === step.phase;
+                  return (
                   <div key={step.phase} className="flex items-start gap-3">
                     <div
                       className={classNames(
                         "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
                         step.complete
                           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-zinc-200 bg-white text-zinc-400"
+                          : isCurrent
+                            ? "border-sky-200 bg-sky-50 text-sky-700"
+                            : "border-zinc-200 bg-white text-zinc-400"
                       )}
                     >
                       {step.complete ? <CheckCircle2 className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -698,12 +676,15 @@ export function ReservationAssistSection({
                       <p className="mt-1 leading-6 text-zinc-600">
                         {step.complete
                           ? `${formatSyncTime(step.at)} • ${step.message}`
-                          : "Waiting for this step."}
+                          : activeDisneyJob
+                            ? "This is the next live step."
+                            : "Waiting for the next connect attempt."}
                       </p>
                     </div>
                   </div>
-                ))}
-                {(failureEvent || latestFailureMessage) && (
+                  );
+                })}
+                {hasTerminalFailure && (failureEvent || latestFailureMessage) && (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
                     <div className="font-semibold">Failure / pause reason</div>
                     <p className="mt-2 leading-6">
@@ -712,15 +693,24 @@ export function ReservationAssistSection({
                   </div>
                 )}
               </div>
-            </div>
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
-              {correlationRows.map((row) => (
-                <div key={row.label} className="rounded-2xl border border-zinc-200 bg-white px-3 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{row.label}</div>
-                  <div className="mt-1 break-all text-sm font-medium text-zinc-900">{row.value}</div>
+            ) : (
+              <div className="mt-3 rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-4 text-sm leading-6 text-zinc-600">
+                No Disney connect attempt is in flight right now. Pair the Mac once, then use the connect button when you want the local worker to take over.
+              </div>
+            )}
+            {shouldShowDiagnostics && (
+              <details className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-4">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-900">Worker details</summary>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {correlationRows.map((row) => (
+                    <div key={row.label} className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{row.label}</div>
+                      <div className="mt-1 break-all text-sm font-medium text-zinc-900">{row.value}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </details>
+            )}
           </div>
 
           {!sessionUser && (
@@ -730,14 +720,14 @@ export function ReservationAssistSection({
           )}
 
           {sessionUser && (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="font-semibold text-zinc-900">Pair a local Mac</div>
-                  <p className="mt-1 leading-6">
-                    Generate a pairing payload once, paste it into the local macOS worker app, and that Mac can start claiming Disney jobs for this account.
-                  </p>
-                </div>
+            <details className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700" open={showPairingSection}>
+              <summary className="cursor-pointer list-none font-semibold text-zinc-900">
+                {activeLocalDevice ? "Pair or switch local Mac" : "Pair a local Mac"}
+              </summary>
+              <p className="mt-2 leading-6">
+                Generate a pairing payload once, paste it into the local macOS worker app, and that Mac can start claiming Disney jobs for this account.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={() => void handleCreatePairToken()}
@@ -764,12 +754,12 @@ export function ReservationAssistSection({
                     value={pairToken}
                     readOnly
                     rows={4}
-                    placeholder="Generate this once, then paste it into the local macOS tray app."
+                    placeholder="Generate this once, then paste it into the local macOS worker app."
                     className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none"
                   />
                 </label>
               </div>
-            </div>
+            </details>
           )}
 
           <div className="mt-4 grid gap-3">
@@ -865,12 +855,12 @@ export function ReservationAssistSection({
             </div>
           </div>
 
-          {(plannerHubConnection.lastRequiredActionMessage || plannerHubConnection.lastAuthFailureReason) && (
+          {(summarizedActionMessage || plannerHubConnection.lastAuthFailureReason) && (
             <div className="mt-4 space-y-3">
-              {plannerHubConnection.lastRequiredActionMessage && (
+              {summarizedActionMessage && (
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
                   <div className="font-semibold text-zinc-900">Action needed</div>
-                  <p className="mt-2 leading-6">{plannerHubConnection.lastRequiredActionMessage}</p>
+                  <p className="mt-2 leading-6">{summarizedActionMessage}</p>
                   {effectiveConnectionStatus === "pending_connect" && !latestDisneyJob?.startedAt && (
                     <p className="mt-2 leading-6 text-zinc-500">
                       The Disney worker service has not started this planner-hub job yet. If this stays queued, check the dedicated worker service rather than the background scheduler.
@@ -887,8 +877,8 @@ export function ReservationAssistSection({
             </div>
           )}
 
-          <details className="mt-6 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4" open>
-            <summary className="cursor-pointer list-none text-base font-semibold text-zinc-900">Verification</summary>
+          <details className="mt-6 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4">
+            <summary className="cursor-pointer list-none text-base font-semibold text-zinc-900">Verification notes</summary>
             <div className="mt-4 space-y-4">
               <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
                 <div className="font-semibold text-zinc-900">Same-tab Disney proof</div>
