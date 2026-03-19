@@ -486,11 +486,31 @@ function buildPlannerHubJobDiagnostics(state: BackendState): PlannerHubJobDiagno
 function normalizeImportedDisneyMembers(value: unknown): ImportedDisneyMember[] {
   if (!Array.isArray(value)) return [];
 
+  const seen = new Set<string>();
+  const junkPattern =
+    /Footer Links|Visit Disney|Related Disney Sites|Parks\s*&\s*Tickets|Things To Do|Places To Stay|Help|Annual Passports|Tickets\s*&\s*Parks/i;
+  const looksLikeRealName = (value: string) => {
+    const text = value.trim();
+    if (!text || text.length > 80) return false;
+    if (junkPattern.test(text)) return false;
+    if (/\.com\b/i.test(text)) return false;
+    if (/[_{}\[\];]/.test(text)) return false;
+    if (/function\s*\(|_satellite|querySelector|setTimeout|return\s*\(/i.test(text)) return false;
+    if (/Magic Key|Ticket|Reservation|No-Shows?|View Details|Age\s*\d/i.test(text)) return false;
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length < 2) return false;
+    return words.every((word) => /^[A-Za-z'.-]+$/.test(word));
+  };
+
   return value
     .filter((item) => item && typeof item === "object")
     .map((item) => {
       const next = item as Partial<ImportedDisneyMember>;
-      const magicKeyPassType =
+      const entitlementType: ImportedDisneyMember["entitlementType"] =
+        next.entitlementType === "ticket_holder" ? "ticket_holder" : "magic_key";
+      const sourceGroup: ImportedDisneyMember["sourceGroup"] =
+        next.sourceGroup === "ticket_holder" ? "ticket_holder" : "magic_key";
+      const magicKeyPassType: ImportedDisneyMember["magicKeyPassType"] =
         next.magicKeyPassType === "inspire" ||
         next.magicKeyPassType === "believe" ||
         next.magicKeyPassType === "enchant" ||
@@ -503,14 +523,28 @@ function normalizeImportedDisneyMembers(value: unknown): ImportedDisneyMember[] 
         id: typeof next.id === "string" ? next.id : randomUUID(),
         plannerHubId: typeof next.plannerHubId === "string" && next.plannerHubId ? next.plannerHubId : "primary",
         displayName: typeof next.displayName === "string" ? next.displayName : "",
-        entitlementType: next.entitlementType === "ticket_holder" ? "ticket_holder" : "magic_key",
+        entitlementType,
+        sourceGroup,
         entitlementLabel: typeof next.entitlementLabel === "string" ? next.entitlementLabel : "",
+        rawSectionLabel: typeof next.rawSectionLabel === "string" ? next.rawSectionLabel : "",
         passLabel: typeof next.passLabel === "string" ? next.passLabel : "",
         magicKeyPassType,
         rawEligibilityText: typeof next.rawEligibilityText === "string" ? next.rawEligibilityText : "",
         automatable: Boolean(next.automatable),
         importedAt: typeof next.importedAt === "string" ? next.importedAt : new Date().toISOString(),
       };
+    })
+    .filter((member) => {
+      if (!looksLikeRealName(member.displayName)) return false;
+      if (junkPattern.test(member.entitlementLabel || "")) return false;
+      if (junkPattern.test(member.passLabel || "")) return false;
+      if (junkPattern.test(member.rawSectionLabel || "")) return false;
+      if (!member.passLabel.trim()) return false;
+      if (member.sourceGroup === "magic_key" && !member.magicKeyPassType) return false;
+      const dedupeKey = `${member.sourceGroup}:${member.displayName.toLowerCase()}:${member.passLabel.toLowerCase()}`;
+      if (seen.has(dedupeKey)) return false;
+      seen.add(dedupeKey);
+      return true;
     });
 }
 

@@ -452,6 +452,7 @@ export function ReservationAssistSection({
     activeDisneyJob ||
     Boolean(plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastClaimedJobId || plannerHubConnection.lastReportedJobId);
   const showExpandedTimeline = activeDisneyJob || hasTerminalFailure;
+  const minimalConnectedState = effectiveConnectionStatus === "connected" && !activeDisneyJob && !hasTerminalFailure;
   const summarizedActionMessage =
     plannerHubConnection.lastRequiredActionMessage &&
     plannerHubConnection.lastRequiredActionMessage !== latestWorkerMessage &&
@@ -619,29 +620,42 @@ export function ReservationAssistSection({
                 ? `Last backend update ${formatSyncTime(plannerHubConnection.latestJobUpdatedAt)}`
                 : "Waiting for the next Disney worker update."}
             </p>
-            <p className="mt-2 text-xs leading-5 text-zinc-700">{latestWorkerMessage}</p>
+            {!minimalConnectedState && <p className="mt-2 text-xs leading-5 text-zinc-700">{latestWorkerMessage}</p>}
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-              <div className="font-semibold text-zinc-900">Active local device</div>
-              <p className="mt-2 leading-6">
+          {minimalConnectedState ? (
+            <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold">
+              <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
                 {activeLocalDevice
-                  ? `${activeLocalDevice.deviceName} • ${activeLocalDevice.platform} • last seen ${formatSyncTime(
-                      activeLocalDevice.lastSeenAt || activeLocalDevice.lastCheckInAt
-                    )}`
-                  : "No local Disney worker has checked in yet."}
-              </p>
+                  ? `${activeLocalDevice.deviceName} • last seen ${formatSyncTime(activeLocalDevice.lastSeenAt || activeLocalDevice.lastCheckInAt)}`
+                  : "No active local device"}
+              </span>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-800">
+                {plannerHubConnection.hasLocalSession ? "Local Disney session ready" : "No local Disney session"}
+              </span>
             </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-              <div className="font-semibold text-zinc-900">Local Disney profile</div>
-              <p className="mt-2 leading-6">
-                {plannerHubConnection.hasLocalSession
-                  ? "This account has a live Disney session on the active local device."
-                  : "No device-local Disney session has been confirmed yet."}
-              </p>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+                <div className="font-semibold text-zinc-900">Active local device</div>
+                <p className="mt-2 leading-6">
+                  {activeLocalDevice
+                    ? `${activeLocalDevice.deviceName} • ${activeLocalDevice.platform} • last seen ${formatSyncTime(
+                        activeLocalDevice.lastSeenAt || activeLocalDevice.lastCheckInAt
+                      )}`
+                    : "No local Disney worker has checked in yet."}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+                <div className="font-semibold text-zinc-900">Local Disney profile</div>
+                <p className="mt-2 leading-6">
+                  {plannerHubConnection.hasLocalSession
+                    ? "This account has a live Disney session on the active local device."
+                    : "No device-local Disney session has been confirmed yet."}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
             <div className="flex items-center justify-between gap-3">
@@ -700,14 +714,6 @@ export function ReservationAssistSection({
                 <p className="mt-2 leading-6">
                   The active Mac has a working Disney session. Import connected members whenever you want to refresh the party, then choose who each watched date should target.
                 </p>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-800">
-                    {magicKeyMembers.length} Magic Key {magicKeyMembers.length === 1 ? "member" : "members"}
-                  </span>
-                  <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
-                    {ticketHolders.length} ticket {ticketHolders.length === 1 ? "holder" : "holders"}
-                  </span>
-                </div>
               </div>
             ) : (
               <div className="mt-3 rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-4 text-sm leading-6 text-zinc-600">
@@ -794,17 +800,19 @@ export function ReservationAssistSection({
                 className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-violet-300 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
               />
             </label>
-            <label className="space-y-2 text-sm">
-              <span className="font-medium text-zinc-700">One-time Disney password handoff</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                disabled={!sessionUser}
-                placeholder="Optional: hand off a password once, or leave blank and use the local Disney session on your active Mac"
-                className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-violet-300 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </label>
+            {!(minimalConnectedState && plannerHubConnection.hasLocalSession) && (
+              <label className="space-y-2 text-sm">
+                <span className="font-medium text-zinc-700">One-time Disney password handoff</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  disabled={!sessionUser}
+                  placeholder="Optional: hand off a password once, or leave blank and use the local Disney session on your active Mac"
+                  className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-violet-300 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3">
@@ -852,24 +860,26 @@ export function ReservationAssistSection({
             )}
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-              <div className="font-semibold text-zinc-900">Encrypted session</div>
-              <p className="mt-2 leading-6">
-                {plannerHubConnection.hasLocalSession || plannerHubConnection.hasEncryptedSession
-                  ? "A working Disney session has been confirmed for this planner hub."
-                  : "No Disney session has been confirmed yet for the active local device."}
-              </p>
+          {!minimalConnectedState && (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+                <div className="font-semibold text-zinc-900">Encrypted session</div>
+                <p className="mt-2 leading-6">
+                  {plannerHubConnection.hasLocalSession || plannerHubConnection.hasEncryptedSession
+                    ? "A working Disney session has been confirmed for this planner hub."
+                    : "No Disney session has been confirmed yet for the active local device."}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+                <div className="font-semibold text-zinc-900">Imported members</div>
+                <p className="mt-2 leading-6">
+                  {plannerHubConnection.importedMemberCount > 0
+                    ? `${plannerHubConnection.importedMemberCount} connected Disney members imported.`
+                    : "No connected members imported yet."}
+                </p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-              <div className="font-semibold text-zinc-900">Imported members</div>
-              <p className="mt-2 leading-6">
-                {plannerHubConnection.importedMemberCount > 0
-                  ? `${plannerHubConnection.importedMemberCount} connected Disney members imported.`
-                  : "No connected members imported yet."}
-              </p>
-            </div>
-          </div>
+          )}
 
           {(summarizedActionMessage || plannerHubConnection.lastAuthFailureReason) && (
             <div className="mt-4 space-y-3">

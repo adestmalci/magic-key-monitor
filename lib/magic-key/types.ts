@@ -199,7 +199,9 @@ export type ImportedDisneyMember = {
   plannerHubId: string;
   displayName: string;
   entitlementType: DisneyEntitlementType;
+  sourceGroup: DisneyEntitlementType;
   entitlementLabel: string;
+  rawSectionLabel: string;
   passLabel: string;
   magicKeyPassType: PassType | "";
   rawEligibilityText: string;
