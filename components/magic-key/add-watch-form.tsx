@@ -66,9 +66,6 @@ export function AddWatchForm({
   const backgroundSeen = Boolean(backgroundCheckedAt);
   const modeLabel = syncMeta.stale ? "Showing last good snapshot" : "Live Disney mode";
   const headlineLabel = syncMeta.stale ? "Last checked" : "Last live sync";
-  const detailLabel = syncMeta.stale
-    ? `Checked ${formatSyncTime(checkedAt)}. Latest good live snapshot is ${formatSyncTime(lastSyncAt)}.`
-    : "Latest Disney availability is loaded and ready for your watchlist.";
   const backgroundLabel = backgroundCheckedAt ? formatSyncTime(backgroundCheckedAt) : "Not seen yet";
   const backgroundStateLabel = backgroundSeen ? (backgroundHealthy ? "Healthy" : "Delayed") : "Not seen yet";
   const backgroundStateTone = backgroundSeen
@@ -255,10 +252,10 @@ export function AddWatchForm({
                 </div>
               </div>
             </div>
-            <div className="flex min-h-[168px] flex-col items-center justify-center rounded-[24px] border border-zinc-200 bg-white/80 p-4 text-center shadow-sm shadow-zinc-200/50">
+            <div className="flex min-h-[168px] flex-col justify-center rounded-[24px] border border-zinc-200 bg-white/80 p-5 text-left shadow-sm shadow-zinc-200/50">
               <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{headlineLabel}</div>
-              <div className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900">{formatSyncTime(checkedAt)}</div>
-              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+              <div className="mt-2 text-4xl font-semibold tracking-tight text-zinc-900">{formatSyncTime(checkedAt)}</div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <div className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-[11px] font-medium text-violet-800">
                   {modeLabel}
                 </div>
@@ -272,10 +269,9 @@ export function AddWatchForm({
                   <span className="font-semibold">{backgroundStateLabel}</span>
                 </div>
               </div>
-              <div className="mt-3 max-w-[24ch] text-sm leading-6 text-zinc-700">{detailLabel}</div>
-              <div className="mt-2 max-w-[28ch] text-xs leading-5 text-zinc-500">
+              <div className="mt-4 text-sm leading-6 text-zinc-600">
                 {backgroundSeen
-                  ? `Scheduler last seen ${formatSyncTime(backgroundCheckedAt)}.`
+                  ? `Scheduler last seen ${backgroundLabel}.`
                   : "Background scheduler has not checked in yet."}
               </div>
             </div>

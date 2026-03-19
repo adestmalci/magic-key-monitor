@@ -19,9 +19,9 @@ import type {
   FeedRow,
   ImportedDisneyMember,
   LocalWorkerDevice,
-  PlannerHubConnectionState,
   PlannerHubBookingState,
   PlannerHubBookingStatus,
+  PlannerHubConnectionState,
   ReservationAssistState,
   ReservationHandoffOutcome,
   ReservationSessionStatus,
@@ -129,16 +129,6 @@ const connectionTone: Record<
     tone: "border-rose-200 bg-rose-50 text-rose-900",
     helper: "The last Disney connection or import attempt failed closed.",
   },
-};
-
-const bookingMeta: Record<PlannerHubBookingStatus, { label: string; tone: string }> = {
-  idle: { label: "Standing by", tone: "border-zinc-200 bg-zinc-50 text-zinc-700" },
-  armed: { label: "Monitoring", tone: "border-emerald-200 bg-emerald-50 text-emerald-900" },
-  paused_login: { label: "Paused for login", tone: "border-amber-200 bg-amber-50 text-amber-900" },
-  paused_mismatch: { label: "Paused for mismatch", tone: "border-rose-200 bg-rose-50 text-rose-900" },
-  attempting: { label: "Attempting", tone: "border-sky-200 bg-sky-50 text-sky-900" },
-  booked: { label: "Booked", tone: "border-emerald-200 bg-emerald-50 text-emerald-900" },
-  failed: { label: "Failed", tone: "border-rose-200 bg-rose-50 text-rose-900" },
 };
 
 const livePhaseOrder = [
@@ -469,7 +459,6 @@ export function ReservationAssistSection({
   const showCheckpoint = reservationAssist.sessionStatus === "checking";
   const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestConnectJob);
   const currentConnectionMeta = connectionTone[effectiveConnectionStatus];
-  const currentBookingMeta = bookingMeta[plannerHubBooking.status];
   const activeDisneyJob = connectJobActive;
   const hasTerminalFailure =
     effectiveConnectionStatus === "failed" ||
@@ -1425,14 +1414,9 @@ export function ReservationAssistSection({
         </section>
 
         <section className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Booking</div>
-              <h3 className="mt-2 text-xl font-semibold text-zinc-900">Imported connected members</h3>
-            </div>
-            <div className={`rounded-full border px-4 py-2 text-sm font-semibold ${currentBookingMeta.tone}`}>
-              {currentBookingMeta.label}
-            </div>
+          <div>
+            <div className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Booking</div>
+            <h3 className="mt-2 text-xl font-semibold text-zinc-900">Imported connected members</h3>
           </div>
 
           <p className="mt-3 text-sm leading-6 text-zinc-600">
@@ -1451,7 +1435,7 @@ export function ReservationAssistSection({
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-4 py-4">
               <div className="text-sm font-semibold text-zinc-900">Magic Key members</div>
-              <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              <div className="mt-3 grid gap-3 2xl:grid-cols-2">
                 {magicKeyMembers.length === 0 ? (
                   <p className="text-sm text-zinc-500">No imported Magic Key members yet.</p>
                 ) : (
@@ -1462,19 +1446,16 @@ export function ReservationAssistSection({
                         key={member.id}
                         className="rounded-[24px] border border-violet-100 bg-white px-4 py-4 text-sm text-zinc-700 shadow-sm shadow-violet-100/40"
                       >
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-center gap-3">
                           {passMeta ? (
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] bg-gradient-to-br from-violet-100 via-fuchsia-50 to-white ring-1 ring-violet-100">
-                              <PassIcon passType={passMeta.id} size="h-7 w-7" />
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] bg-gradient-to-br from-violet-100 via-fuchsia-50 to-white ring-1 ring-violet-100">
+                              <PassIcon passType={passMeta.id} size="h-8 w-8" />
                             </div>
                           ) : null}
                           <div className="min-w-0 flex-1">
-                            <div className="font-semibold text-zinc-900">{member.displayName}</div>
-                            <div className="mt-2 inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-900">
-                              {passMeta ? `${passMeta.short} Key` : member.passLabel || member.entitlementLabel}
-                            </div>
+                            <div className="text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</div>
                             {(member.passLabel || member.entitlementLabel) && (
-                              <div className="mt-2 text-sm text-zinc-500">{member.passLabel || member.entitlementLabel}</div>
+                              <div className="mt-1 text-sm font-medium text-zinc-600">{member.passLabel || member.entitlementLabel}</div>
                             )}
                           </div>
                         </div>
@@ -1508,21 +1489,21 @@ export function ReservationAssistSection({
           <div className="mt-6 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Watch target</div>
-              <div className={classNames("rounded-full border px-3 py-1 text-xs font-semibold", bookingReadiness.tone)}>
-                {bookingReadiness.label}
+              <div className={classNames("rounded-full border px-3 py-1 text-xs font-semibold", watchTargetStatus.tone)}>
+                {watchTargetStatus.label}
               </div>
             </div>
             {watchItems.length === 0 ? (
               <p className="mt-3 text-sm leading-6 text-zinc-600">Add a watched date first, then choose the imported Disney members who should be targeted for that date.</p>
             ) : (
               <>
-                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-end">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-zinc-700">Watched date</span>
                     <select
                       value={currentTarget?.id ?? ""}
                       onChange={(event) => setTargetWatchId(event.target.value)}
-                      className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-violet-300"
+                      className="w-full min-w-0 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none transition focus:border-violet-300"
                     >
                       {watchItems.map((item) => {
                         const passName = PASS_TYPES.find((pass) => pass.id === item.passType)?.name ?? item.passType;
@@ -1539,7 +1520,7 @@ export function ReservationAssistSection({
                     onClick={handleToggleAutoBooking}
                     disabled={!currentTarget}
                     className={classNames(
-                      "inline-flex h-12 items-center gap-2 rounded-2xl px-4 text-sm font-semibold transition",
+                      "inline-flex h-12 items-center justify-center gap-2 rounded-2xl px-5 text-sm font-semibold transition lg:min-w-[220px]",
                       targetAutoBookingEnabled
                         ? "border border-violet-200 bg-violet-600 text-white"
                         : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50",
@@ -1548,14 +1529,6 @@ export function ReservationAssistSection({
                   >
                     {targetAutoBookingEnabled ? "Auto booking on" : "Turn on auto booking"}
                   </button>
-                  <div
-                    className={classNames(
-                      "inline-flex h-12 items-center rounded-2xl border px-4 text-sm font-semibold",
-                      watchTargetStatus.tone
-                    )}
-                  >
-                    {watchTargetStatus.label}
-                  </div>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-zinc-600">{watchTargetStatus.message}</p>
 
@@ -1566,7 +1539,7 @@ export function ReservationAssistSection({
                         Import the connected Disney party first so you can choose Magic Key targets for this watched date.
                       </div>
                     ) : (
-                      <div className="grid gap-3 md:grid-cols-2">
+                      <div className="grid gap-3 xl:grid-cols-2">
                         {magicKeyTargetRows.map(({ member, eligibility, selected }) => {
                           const disabled = !eligibility.eligible && !selected;
                           const passMeta = passMetaForMember(member);
@@ -1598,18 +1571,15 @@ export function ReservationAssistSection({
                                 className="mt-1 h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
                               />
                               <span className="min-w-0 flex-1">
-                                <span className="flex items-start gap-3">
+                                <span className="flex items-center gap-3">
                                   {passMeta ? (
-                                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] bg-gradient-to-br from-violet-100 via-fuchsia-50 to-white ring-1 ring-violet-100">
-                                      <PassIcon passType={passMeta.id} size="h-7 w-7" />
+                                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] bg-gradient-to-br from-violet-100 via-fuchsia-50 to-white ring-1 ring-violet-100">
+                                      <PassIcon passType={passMeta.id} size="h-8 w-8" />
                                     </span>
                                   ) : null}
                                   <span className="min-w-0">
-                                    <span className="block font-semibold text-zinc-900">{member.displayName}</span>
-                                    <span className="mt-2 inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-900">
-                                      {passMeta ? `${passMeta.short} Key` : member.passLabel}
-                                    </span>
-                                    <span className="mt-2 block text-zinc-500">{member.passLabel}</span>
+                                    <span className="block text-lg font-semibold leading-tight text-zinc-900">{member.displayName}</span>
+                                    <span className="mt-1 block text-sm font-medium text-zinc-600">{member.passLabel}</span>
                                   </span>
                                 </span>
                                 <span
