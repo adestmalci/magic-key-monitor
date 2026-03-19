@@ -451,6 +451,7 @@ export function ReservationAssistSection({
     hasTerminalFailure ||
     activeDisneyJob ||
     Boolean(plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastClaimedJobId || plannerHubConnection.lastReportedJobId);
+  const showExpandedTimeline = activeDisneyJob || hasTerminalFailure;
   const summarizedActionMessage =
     plannerHubConnection.lastRequiredActionMessage &&
     plannerHubConnection.lastRequiredActionMessage !== latestWorkerMessage &&
@@ -653,7 +654,7 @@ export function ReservationAssistSection({
                     : "No active Disney job"}
               </div>
             </div>
-            {visibleTimeline.length > 0 ? (
+            {showExpandedTimeline && visibleTimeline.length > 0 ? (
               <div className="mt-3 space-y-3 rounded-2xl border border-zinc-200 bg-white px-4 py-4">
                 {visibleTimeline.map((step) => {
                   const isCurrent = !step.complete && nextTimelineStep?.phase === step.phase;
@@ -692,6 +693,21 @@ export function ReservationAssistSection({
                     </p>
                   </div>
                 )}
+              </div>
+            ) : effectiveConnectionStatus === "connected" ? (
+              <div className="mt-3 rounded-2xl border border-emerald-200 bg-white px-4 py-4 text-sm text-zinc-700">
+                <div className="font-semibold text-zinc-900">Connected and ready</div>
+                <p className="mt-2 leading-6">
+                  The active Mac has a working Disney session. Import connected members whenever you want to refresh the party, then choose who each watched date should target.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-800">
+                    {magicKeyMembers.length} Magic Key {magicKeyMembers.length === 1 ? "member" : "members"}
+                  </span>
+                  <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
+                    {ticketHolders.length} ticket {ticketHolders.length === 1 ? "holder" : "holders"}
+                  </span>
+                </div>
               </div>
             ) : (
               <div className="mt-3 rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-4 text-sm leading-6 text-zinc-600">
@@ -999,6 +1015,15 @@ export function ReservationAssistSection({
           <p className="mt-3 text-sm leading-6 text-zinc-600">
             Magic Key members are the only automatable members in this phase. Ticket holders stay visible so the connected Disney party is still truthful, but they are not selectable for automated booking yet.
           </p>
+
+          <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold">
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-800">
+              {magicKeyMembers.length} Magic Key {magicKeyMembers.length === 1 ? "member" : "members"}
+            </span>
+            <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
+              {ticketHolders.length} ticket {ticketHolders.length === 1 ? "holder" : "holders"}
+            </span>
+          </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">

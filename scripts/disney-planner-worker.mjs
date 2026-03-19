@@ -323,9 +323,10 @@ function looksLikeRealMemberName(text) {
   const value = String(text || "").trim();
   if (!value) return false;
   if (value.length > 80) return false;
+  if (/\.com\b/i.test(value)) return false;
   if (/[_{}\[\];]/.test(value)) return false;
   if (/function\s*\(|_satellite|querySelector|setTimeout|return\s*\(/i.test(value)) return false;
-  if (/Magic Key|Ticket|Reservation|No-Shows?|View Details|Related Disney Sites|Age\s*\d/i.test(value)) return false;
+  if (/Magic Key|Ticket|Reservation|No-Shows?|View Details|Related Disney Sites|Visit Disney|Age\s*\d/i.test(value)) return false;
   const words = value.split(/\s+/).filter(Boolean);
   if (words.length < 2) return false;
   return words.every((word) => /^[A-Za-z'.-]+$/.test(word));
@@ -375,15 +376,22 @@ async function scrapeConnectedMembers(page, progress) {
     return inputs.map((input, index) => {
       const lines = extractLines(input);
       const heading = headingFor(input);
+      const ageLine = lines.find((line) => /^Age\s*/i.test(line)) || "";
       const displayName = lines.find((line) => looksLikeRealMemberName(line)) || "";
       const passLabel =
-        lines.find((line) => /Key Pass|Ticket/i.test(line) && !/Reservation/i.test(line)) || "";
+        lines.find(
+          (line) =>
+            /Key Pass|Ticket/i.test(line) &&
+            !/Reservation/i.test(line) &&
+            !/Tickets\s*&\s*Parks/i.test(line)
+        ) || "";
       const rawEligibilityText = lines
         .filter((line) => /Reservation/i.test(line) || /No-Shows?/i.test(line))
         .join(" • ");
 
       return {
         id: `${heading || "member"}-${index}`,
+        ageLine,
         displayName,
         entitlementLabel: heading || "Connected member",
         passLabel,
@@ -392,7 +400,9 @@ async function scrapeConnectedMembers(page, progress) {
     });
   });
 
-  const validMembers = members.filter((member) => member.displayName && member.passLabel);
+  const validMembers = members.filter(
+    (member) => member.displayName && member.passLabel && member.ageLine
+  );
 
   if (!validMembers.length) {
     return {
