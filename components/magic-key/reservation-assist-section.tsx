@@ -390,13 +390,33 @@ export function ReservationAssistSection({
     () => importedDisneyMembers.filter((member) => member.entitlementType === "ticket_holder"),
     [importedDisneyMembers]
   );
-  const eligibleMembers = useMemo(() => {
-    if (!currentTarget) return [] as ImportedDisneyMember[];
-    return magicKeyMembers.filter((member) => summarizeEligibility(member, currentTarget, lookup).eligible);
+  const magicKeyTargetRows = useMemo(() => {
+    if (!currentTarget) return [] as Array<{ member: ImportedDisneyMember; eligibility: ReturnType<typeof summarizeEligibility>; selected: boolean }>;
+    return magicKeyMembers.map((member) => {
+      const eligibility = summarizeEligibility(member, currentTarget, lookup);
+      return {
+        member,
+        eligibility,
+        selected: currentTarget.selectedImportedMemberIds.includes(member.id),
+      };
+    });
   }, [currentTarget, lookup, magicKeyMembers]);
-  const selectedCount = currentTarget?.selectedImportedMemberIds.length ?? 0;
-  const targetIsReservable = Boolean(currentTarget && ["either", "dl", "dca"].includes(currentTarget.currentStatus));
-  const canArmCurrentTarget = Boolean(currentTarget && targetIsReservable && selectedCount > 0 && plannerHubConnection.status === "connected");
+  const selectedMagicKeyRows = useMemo(() => magicKeyTargetRows.filter((row) => row.selected), [magicKeyTargetRows]);
+  const selectedEligibleRows = useMemo(
+    () => selectedMagicKeyRows.filter((row) => row.eligibility.eligible),
+    [selectedMagicKeyRows]
+  );
+  const selectedUnavailableRows = useMemo(
+    () => selectedMagicKeyRows.filter((row) => !row.eligibility.eligible),
+    [selectedMagicKeyRows]
+  );
+  const selectedCount = selectedMagicKeyRows.length;
+  const canArmCurrentTarget = Boolean(
+    currentTarget &&
+      plannerHubConnection.status === "connected" &&
+      selectedEligibleRows.length > 0 &&
+      selectedUnavailableRows.length === 0
+  );
   const verificationProgress = [
     reservationAssist.plannerHubConfirmed,
     reservationAssist.partyProofCaptured,
@@ -545,6 +565,80 @@ export function ReservationAssistSection({
       : "";
   const importButtonLabel =
     importedDisneyMembers.length > 0 ? "Refresh connected party" : "Import connected members";
+  const connectButtonLabel =
+    effectiveConnectionStatus === "connected" ? "Reconnect Disney on active Mac" : "Connect Disney on active Mac";
+
+  const bookingReadiness = useMemo(() => {
+    if (!currentTarget) {
+      return {
+        label: "Pick a watched date",
+        tone: "border-zinc-200 bg-zinc-50 text-zinc-700",
+        message: "Choose a watched date to see whether auto booking can run for it.",
+      };
+    }
+
+    if (plannerHubConnection.status === "paused_login" || !plannerHubConnection.hasLocalSession) {
+      return {
+        label: "Reconnect Disney",
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        message: "Reconnect Disney on your Mac before another automatic booking attempt can run.",
+      };
+    }
+
+    if (plannerHubConnection.status === "paused_mismatch") {
+      return {
+        label: "Party needs refresh",
+        tone: "border-rose-200 bg-rose-50 text-rose-900",
+        message: "Refresh the connected Disney party and reselect the right Magic Key members for this watched date.",
+      };
+    }
+
+    if (!plannerHubBooking.enabled) {
+      return {
+        label: "Auto booking is off",
+        tone: "border-zinc-200 bg-zinc-50 text-zinc-700",
+        message: "Turn on auto booking attempts when you want your active Mac to watch this date for you.",
+      };
+    }
+
+    if (selectedCount === 0) {
+      return {
+        label: "Needs member selection",
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        message: "Select at least one eligible Magic Key member for this watched date.",
+      };
+    }
+
+    if (selectedUnavailableRows.length > 0) {
+      return {
+        label: "Waiting for this date to open",
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        message: `${selectedUnavailableRows.map((row) => row.member.displayName).join(", ")} ${selectedUnavailableRows.length === 1 ? "is" : "are"} currently unavailable for this watched date.`,
+      };
+    }
+
+    if (selectedEligibleRows.length === 0) {
+      return {
+        label: "Waiting for this date to open",
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        message: "This watched date is not currently reservable for the selected Magic Key member targets.",
+      };
+    }
+
+    return {
+      label: "Ready to attempt",
+      tone: "border-emerald-200 bg-emerald-50 text-emerald-900",
+      message: `${selectedEligibleRows.length} selected Magic Key member${selectedEligibleRows.length === 1 ? "" : "s"} can be used when this watched date is watched with auto-booking.`,
+    };
+  }, [
+    currentTarget,
+    plannerHubBooking.enabled,
+    plannerHubConnection.hasLocalSession,
+    plannerHubConnection.status,
+    selectedCount,
+    selectedEligibleRows,
+    selectedUnavailableRows,
+  ]);
 
   function stampVerification(patch: Partial<ReservationAssistState>) {
     onReservationAssistChange({
@@ -904,7 +998,7 @@ export function ReservationAssistSection({
             </div>
           )}
 
-          {sessionUser && (
+          {sessionUser && !minimalConnectedState && (
             <details className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700" open={showPairingSection}>
               <summary className="cursor-pointer list-none font-semibold text-zinc-900">
                 {activeLocalDevice ? "Pair or switch local Mac" : "Pair a local Mac"}
@@ -947,6 +1041,7 @@ export function ReservationAssistSection({
             </details>
           )}
 
+          {!minimalConnectedState && (
           <div className="mt-4 grid gap-3">
             <label className="space-y-2 text-sm">
               <span className="font-medium text-zinc-700">Disney hub email</span>
@@ -977,51 +1072,104 @@ export function ReservationAssistSection({
               </label>
             )}
           </div>
+          )}
 
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => void handleConnectSubmit()}
-              disabled={!sessionUser || isConnecting || !disneyEmail.trim()}
-              className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <LogIn className="h-4 w-4" />
-              {isConnecting ? "Queueing Disney connect..." : "Connect Disney on active Mac"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleImport()}
-              disabled={!sessionUser || isImporting || plannerHubConnection.status !== "connected"}
-              className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:border-violet-200 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Users className="h-4 w-4" />
-              {isImporting ? "Queueing party refresh..." : importButtonLabel}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleRefresh()}
-              disabled={!sessionUser || isRefreshing}
-              className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:border-violet-200 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCw className="h-4 w-4" />
-              {isRefreshing ? "Refreshing..." : "Refresh status"}
-            </button>
-            {(effectiveConnectionStatus === "pending_connect" ||
-              effectiveConnectionStatus === "importing" ||
-              effectiveConnectionStatus === "failed" ||
-              effectiveConnectionStatus === "paused_login" ||
-              effectiveConnectionStatus === "paused_mismatch") && (
+          {minimalConnectedState ? (
+            <details className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
+              <summary className="cursor-pointer list-none font-semibold text-zinc-900">Connection maintenance</summary>
+              <div className="mt-4 grid gap-3">
+                <label className="space-y-2 text-sm">
+                  <span className="font-medium text-zinc-700">Disney hub email</span>
+                  <input
+                    type="email"
+                    value={disneyEmail}
+                    onChange={(event) => {
+                      setDisneyEmail(event.target.value);
+                      onPlannerHubConnectionChange({ disneyEmail: event.target.value });
+                      onReservationAssistChange({ plannerHubEmail: event.target.value });
+                    }}
+                    disabled={!sessionUser}
+                    placeholder={sessionUser?.email ?? "Sign in to connect your Disney planner hub"}
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-violet-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleConnectSubmit()}
+                    disabled={!sessionUser || isConnecting || !disneyEmail.trim()}
+                    className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <LogIn className="h-4 w-4" />
+                    {isConnecting ? "Queueing Disney connect..." : connectButtonLabel}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleImport()}
+                    disabled={!sessionUser || isImporting || plannerHubConnection.status !== "connected"}
+                    className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:border-violet-200 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Users className="h-4 w-4" />
+                    {isImporting ? "Queueing party refresh..." : importButtonLabel}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRefresh()}
+                    disabled={!sessionUser || isRefreshing}
+                    className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:border-violet-200 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    {isRefreshing ? "Refreshing..." : "Refresh status"}
+                  </button>
+                </div>
+              </div>
+            </details>
+          ) : (
+            <div className="mt-4 flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => void handleReset()}
-                disabled={!sessionUser || isResetting}
-                className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void handleConnectSubmit()}
+                disabled={!sessionUser || isConnecting || !disneyEmail.trim()}
+                className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <AlertTriangle className="h-4 w-4" />
-                {isResetting ? "Resetting..." : "Reset Disney connection"}
+                <LogIn className="h-4 w-4" />
+                {isConnecting ? "Queueing Disney connect..." : connectButtonLabel}
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={() => void handleImport()}
+                disabled={!sessionUser || isImporting || plannerHubConnection.status !== "connected"}
+                className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:border-violet-200 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Users className="h-4 w-4" />
+                {isImporting ? "Queueing party refresh..." : importButtonLabel}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRefresh()}
+                disabled={!sessionUser || isRefreshing}
+                className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:border-violet-200 hover:text-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className="h-4 w-4" />
+                {isRefreshing ? "Refreshing..." : "Refresh status"}
+              </button>
+              {(effectiveConnectionStatus === "pending_connect" ||
+                effectiveConnectionStatus === "importing" ||
+                effectiveConnectionStatus === "failed" ||
+                effectiveConnectionStatus === "paused_login" ||
+                effectiveConnectionStatus === "paused_mismatch") && (
+                <button
+                  type="button"
+                  onClick={() => void handleReset()}
+                  disabled={!sessionUser || isResetting}
+                  className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  {isResetting ? "Resetting..." : "Reset Disney connection"}
+                </button>
+              )}
+            </div>
+          )}
 
           {!minimalConnectedState && (
             <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -1066,6 +1214,7 @@ export function ReservationAssistSection({
             </div>
           )}
 
+          {!minimalConnectedState && (
           <details className="mt-6 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4">
             <summary className="cursor-pointer list-none text-base font-semibold text-zinc-900">Verification notes</summary>
             <div className="mt-4 space-y-4">
@@ -1172,6 +1321,7 @@ export function ReservationAssistSection({
               </div>
             </div>
           </details>
+          )}
         </section>
 
         <section className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
@@ -1227,7 +1377,7 @@ export function ReservationAssistSection({
                       <div className="font-semibold text-zinc-900">{member.displayName}</div>
                       <div className="mt-1 text-zinc-500">{member.passLabel || member.entitlementLabel}</div>
                       <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
-                        Visible only in v1
+                        Shown for party reference
                       </div>
                     </div>
                   ))
@@ -1276,24 +1426,41 @@ export function ReservationAssistSection({
                     <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
                       <div className="font-semibold text-zinc-900">Eligible imported Magic Key members for {formatWatchDate(currentTarget.date)}</div>
                       <p className="mt-2 leading-6">
-                        Eligibility here means the imported Disney member is not blocked out for the watched date. If you select members with different access, Disney will collapse the party to the narrower shared calendar.
+                        Select the Magic Key members you want the local Mac to use for this watched date. Ticket holders stay visible above for party reference but are not used for auto-booking.
                       </p>
                     </div>
 
-                    {eligibleMembers.length === 0 ? (
+                    {magicKeyTargetRows.length === 0 ? (
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-                        No imported Magic Key members are currently eligible for this watched date.
+                        Import the connected Disney party first so you can choose Magic Key targets for this watched date.
                       </div>
                     ) : (
                       <div className="grid gap-3">
-                        {eligibleMembers.map((member) => {
-                          const selected = currentTarget.selectedImportedMemberIds.includes(member.id);
-                          const eligibility = summarizeEligibility(member, currentTarget, lookup);
+                        {magicKeyTargetRows.map(({ member, eligibility, selected }) => {
+                          const disabled = !eligibility.eligible && !selected;
+                          const nextLabel =
+                            eligibility.status === "either"
+                              ? "Eligible for either park"
+                              : eligibility.status === "dl"
+                                ? "Eligible for Disneyland Park"
+                                : eligibility.status === "dca"
+                                  ? "Eligible for Disney California Adventure"
+                                  : "Waiting for this date to open";
                           return (
-                            <label key={member.id} className="flex items-start gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
+                            <label
+                              key={member.id}
+                              className={classNames(
+                                "flex items-start gap-3 rounded-2xl border bg-white px-4 py-4 text-sm",
+                                selected
+                                  ? "border-violet-200 bg-violet-50/60 text-zinc-800"
+                                  : "border-zinc-200 text-zinc-700",
+                                disabled ? "opacity-70" : ""
+                              )}
+                            >
                               <input
                                 type="checkbox"
                                 checked={selected}
+                                disabled={disabled}
                                 onChange={(event) => {
                                   const nextIds = event.target.checked
                                     ? [...currentTarget.selectedImportedMemberIds, member.id]
@@ -1303,19 +1470,16 @@ export function ReservationAssistSection({
                                     selectedImportedMemberIds: nextIds,
                                   });
                                 }}
-                                className="mt-1 h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500"
+                                className="mt-1 h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
                               />
                               <span>
                                 <span className="block font-semibold text-zinc-900">{member.displayName}</span>
                                 <span className="mt-1 block text-zinc-500">{member.passLabel}</span>
-                                <span className="mt-1 block text-zinc-500">
-                                  {eligibility.status === "either"
-                                    ? "Eligible for either park"
-                                    : eligibility.status === "dl"
-                                      ? "Eligible for Disneyland Park"
-                                      : eligibility.status === "dca"
-                                        ? "Eligible for Disney California Adventure"
-                                        : "Unavailable"}
+                                <span className={classNames(
+                                  "mt-1 block",
+                                  eligibility.eligible ? "text-emerald-700" : "text-amber-700"
+                                )}>
+                                  {nextLabel}
                                 </span>
                               </span>
                             </label>
@@ -1354,11 +1518,6 @@ export function ReservationAssistSection({
                       })}
                     </div>
 
-                    {!canArmCurrentTarget && (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-                        To arm this watched date, connect Disney, make sure the connected party is current, wait until the watched date is reservable, and select at least one eligible Magic Key member.
-                      </div>
-                    )}
                   </div>
                 )}
               </>
@@ -1389,7 +1548,10 @@ export function ReservationAssistSection({
           ) : (
             <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
               <div className="font-semibold text-zinc-900">Booking readiness</div>
-              <p className="mt-2 leading-6">{plannerHubBooking.lastRequiredActionMessage || "Choose eligible Magic Key members on a watched date when you want the local Mac to attempt booking automatically."}</p>
+              <div className={classNames("mt-3 rounded-2xl border px-4 py-4", bookingReadiness.tone)}>
+                <div className="font-semibold">{bookingReadiness.label}</div>
+                <p className="mt-2 leading-6">{bookingReadiness.message}</p>
+              </div>
             </div>
           )}
 
