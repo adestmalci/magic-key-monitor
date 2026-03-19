@@ -1282,6 +1282,7 @@ export async function upsertPreferencesForUser(
   const preferences = getPreferencesFromState(workingState, userId);
   const user = getUserFromState(workingState, userId);
   const currentConnection = preferences.plannerHubConnection;
+  const stepTwoWasVerified = preferences.reservationAssist.stepTwoVerified;
 
   preferences.emailEnabled = patch.emailEnabled ?? preferences.emailEnabled;
   preferences.emailAddress = patch.emailAddress ?? preferences.emailAddress;
@@ -1339,22 +1340,56 @@ export async function upsertPreferencesForUser(
   latestPreferences.importedDisneyMembers = preferences.importedDisneyMembers;
   latestPreferences.savedReservationParties = preferences.savedReservationParties;
 
+  if (!stepTwoWasVerified && latestPreferences.reservationAssist.stepTwoVerified) {
+    queueImmediateReadyBookingInState(latestState, userId);
+  }
+
   await writeBackendState(latestState);
 
   return {
     preferences: {
-      emailEnabled: preferences.emailEnabled,
-      emailAddress: preferences.emailAddress,
-      alertsEnabled: preferences.alertsEnabled,
-      pushEnabled: preferences.pushEnabled,
-      syncFrequency: normalizeSupportedFrequency(preferences.syncFrequency),
+      emailEnabled: latestPreferences.emailEnabled,
+      emailAddress: latestPreferences.emailAddress,
+      alertsEnabled: latestPreferences.alertsEnabled,
+      pushEnabled: latestPreferences.pushEnabled,
+      syncFrequency: normalizeSupportedFrequency(latestPreferences.syncFrequency),
     },
-    reservationAssist: preferences.reservationAssist,
-    plannerHubBooking: preferences.plannerHubBooking,
-    plannerHubConnection: preferences.plannerHubConnection,
-    importedDisneyMembers: preferences.importedDisneyMembers,
-    savedReservationParties: preferences.savedReservationParties,
+    reservationAssist: latestPreferences.reservationAssist,
+    plannerHubBooking: latestPreferences.plannerHubBooking,
+    plannerHubConnection: latestPreferences.plannerHubConnection,
+    importedDisneyMembers: latestPreferences.importedDisneyMembers,
+    savedReservationParties: latestPreferences.savedReservationParties,
   };
+}
+
+function queueImmediateReadyBookingInState(state: BackendState, userId: string) {
+  const preferences = getPreferencesFromState(state, userId);
+  const plannerHubId = preferences.plannerHubConnection.plannerHubId || "primary";
+
+  if (getActivePlannerHubJobForUserByType(state, userId, plannerHubId, "booking")) {
+    return null;
+  }
+
+  const nextReadyWatchItem = state.watchItems
+    .filter((item) => item.userId === userId && item.bookingMode === "watch_and_attempt")
+    .sort((left, right) => {
+      if (left.date !== right.date) return left.date.localeCompare(right.date);
+      return left.updatedAt.localeCompare(right.updatedAt);
+    })
+    .find((item) => plannerHubReadyForAutoAttempt(preferences, item));
+
+  if (!nextReadyWatchItem) {
+    return null;
+  }
+
+  try {
+    return queuePlannerHubBookingJobInState(state, userId, {
+      watchItemId: nextReadyWatchItem.id,
+      reason: `Disney booking attempt queued for ${nextReadyWatchItem.date} after Step 2 verification was completed.`,
+    });
+  } catch {
+    return null;
+  }
 }
 
 export async function createWatchItemForUser(

@@ -480,6 +480,19 @@ export default function Home() {
             throw new Error(data.error || "We couldn't save your account settings.");
           }
 
+          if (data.reservationAssist) {
+            setReservationAssist(data.reservationAssist);
+          }
+          if (data.plannerHubBooking) {
+            setPlannerHubBooking(data.plannerHubBooking);
+          }
+          if (data.plannerHubConnection) {
+            setPlannerHubConnection(data.plannerHubConnection);
+          }
+          if (Array.isArray(data.importedDisneyMembers)) {
+            setImportedDisneyMembers(data.importedDisneyMembers);
+          }
+
           setAccountSaveState("saved");
           setAccountSaveMessage(`Account settings are synced for ${sessionUser.email}.`);
         })
