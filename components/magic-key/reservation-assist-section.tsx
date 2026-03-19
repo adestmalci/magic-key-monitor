@@ -1374,8 +1374,8 @@ export function ReservationAssistSection({
             </div>
           )}
 
-          {!minimalConnectedState && (
-          <details className="mt-6 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4">
+          {(!minimalConnectedState || !reservationAssist.stepTwoVerified) && (
+          <details className="mt-6 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4" open={!reservationAssist.stepTwoVerified}>
             <summary className="cursor-pointer list-none text-base font-semibold text-zinc-900">Verification notes</summary>
             <div className="mt-4 space-y-4">
               <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-700">
