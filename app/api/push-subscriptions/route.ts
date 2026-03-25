@@ -9,7 +9,11 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
-  await upsertPushSubscriptionForUser(user.id, body);
+  const deviceId = String(body?.deviceId || "");
+  await upsertPushSubscriptionForUser(user.id, {
+    deviceId,
+    subscription: body?.subscription ?? body,
+  });
   return Response.json({ ok: true });
 }
 

@@ -12,6 +12,8 @@ export function AlertsSection({
   onSignOut,
   alertsEnabled,
   pushEnabled,
+  currentDevicePushRegistered,
+  accountPushSubscriptionCount,
   emailEnabled,
   emailAddress,
   notificationsSupported,
@@ -37,6 +39,8 @@ export function AlertsSection({
   onSignOut: () => void;
   alertsEnabled: boolean;
   pushEnabled: boolean;
+  currentDevicePushRegistered: boolean;
+  accountPushSubscriptionCount: number;
   emailEnabled: boolean;
   emailAddress: string;
   notificationsSupported: boolean;
@@ -62,13 +66,18 @@ export function AlertsSection({
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
   const emailTarget = emailAddress || user?.email || "";
   const notificationsButtonLabel = notificationsGranted ? "Notifications enabled" : "Enable notifications";
-  const notificationStatusTone = pushEnabled
+  const accountHasPushSomewhere = accountPushSubscriptionCount > 0;
+  const notificationStatusTone = currentDevicePushRegistered
     ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-    : notificationsGranted
+    : accountHasPushSomewhere
+      ? "border-sky-200 bg-sky-50 text-sky-900"
+      : notificationsGranted
       ? "border-violet-200 bg-violet-50 text-violet-900"
       : "border-zinc-200 bg-white text-zinc-700";
-  const notificationStatusMessage = pushEnabled
+  const notificationStatusMessage = currentDevicePushRegistered
     ? "Closed-app push is ready on this device."
+    : accountHasPushSomewhere
+      ? "This account has push on another device, but this browser is not registered yet."
     : !notificationsSupported
       ? notificationsStatusMessage
         : !user
@@ -276,8 +285,10 @@ export function AlertsSection({
 
             {alertsEnabled && notificationsGranted ? (
               <div className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
-                {pushEnabled
+                {currentDevicePushRegistered
                   ? "This device is registered for closed-app push, so watched-date changes can reach you even when the site is closed."
+                  : accountHasPushSomewhere
+                    ? "This signed-in account can still receive push on another registered device. Register this browser too if you want pushes here."
                   : "Local browser alerts are on. If you are signed in and push is configured, this device will also finish closed-app push setup automatically."}
               </div>
             ) : null}
@@ -286,23 +297,27 @@ export function AlertsSection({
               <button
                 type="button"
                 onClick={onSendTestPush}
-                disabled={!user || !pushEnabled || isSendingTestPush}
+                disabled={!user || !accountHasPushSomewhere || isSendingTestPush}
                 className="inline-flex h-11 items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Smartphone className="h-4 w-4" />
-                {isSendingTestPush ? "Sending..." : "Send test push"}
+                {isSendingTestPush ? "Sending..." : "Send test push to linked devices"}
               </button>
 
               <div
                 className={classNames(
                   "inline-flex h-11 items-center rounded-2xl border px-4 text-sm",
-                  pushEnabled
+                  currentDevicePushRegistered
                     ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                    : "border-zinc-200 bg-white text-zinc-700"
+                    : accountHasPushSomewhere
+                      ? "border-sky-200 bg-sky-50 text-sky-900"
+                      : "border-zinc-200 bg-white text-zinc-700"
                 )}
               >
-                {pushEnabled
+                {currentDevicePushRegistered
                   ? "Closed-app push is active on this device"
+                  : accountHasPushSomewhere
+                    ? "Push is active for this account on another device"
                   : !user
                     ? "Sign in to connect this device to background push"
                     : !pushSupported

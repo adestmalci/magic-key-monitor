@@ -278,6 +278,10 @@ export type SchedulerHealth = "never_seen" | "healthy" | "delayed" | "stale";
 export type DashboardUserState = {
   user: SessionUser | null;
   preferences: UserPreferences;
+  pushDelivery: {
+    currentDeviceRegistered: boolean;
+    accountSubscriptionCount: number;
+  };
   reservationAssist: ReservationAssistState;
   plannerHubBooking: PlannerHubBookingState;
   plannerHubConnection: PlannerHubConnectionState;

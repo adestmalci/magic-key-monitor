@@ -4,6 +4,10 @@ import { syncLiveFeed } from "../../../../lib/magic-key/live-sync";
 import { sendAlertsForChanges } from "../../../../lib/magic-key/notifications";
 import { formatWatchDate } from "../../../../lib/magic-key/utils";
 
+function isReservableStatus(status: string) {
+  return status === "dl" || status === "dca" || status === "either";
+}
+
 function isAuthorized(request: Request) {
   const expected = process.env.CRON_SECRET;
   if (!expected) return true;
@@ -42,6 +46,21 @@ export async function GET(request: Request) {
         }),
         createdAt: syncMeta.lastSuccessfulSyncAt || new Date().toISOString(),
       });
+
+      for (const change of changes) {
+        if (!isReservableStatus(change.currentStatus) || isReservableStatus(change.previousStatus)) {
+          continue;
+        }
+
+        const passName = PASS_TYPES.find((row) => row.id === change.item.passType)?.name ?? change.item.passType;
+        recordActivityForUser(evaluation.state, userId, {
+          source: "auto",
+          trigger: "Backend availability detection",
+          message: `Scheduler detected new availability for ${passName} on ${formatWatchDate(change.item.date)} and started delivery.`,
+          details: [`${STATUS_META[change.currentStatus].compactLabel} became available on this scheduler heartbeat.`],
+          createdAt: syncMeta.lastSuccessfulSyncAt || new Date().toISOString(),
+        });
+      }
     }
 
     evaluation.state.syncMeta = {

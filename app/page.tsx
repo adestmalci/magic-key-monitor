@@ -69,6 +69,7 @@ const DEFAULT_SYNC_META: SyncMeta = {
 };
 const ACTIVITY_RETENTION_MS = 1000 * 60 * 60 * 6;
 const ACTIVITY_PRUNE_INTERVAL_MS = 1000 * 60;
+const BROWSER_DEVICE_ID_KEY = "magic_key_monitor_browser_device_id";
 
 function pruneActivityItems(items: ActivityItem[], now = Date.now()) {
   return items
@@ -78,6 +79,17 @@ function pruneActivityItems(items: ActivityItem[], now = Date.now()) {
       return now - createdAt <= ACTIVITY_RETENTION_MS;
     })
     .slice(0, 40);
+}
+
+function ensureBrowserDeviceId() {
+  if (typeof window === "undefined") return "";
+
+  const existing = window.localStorage.getItem(BROWSER_DEVICE_ID_KEY);
+  if (existing) return existing;
+
+  const nextId = window.crypto?.randomUUID?.() || `browser-${Date.now()}`;
+  window.localStorage.setItem(BROWSER_DEVICE_ID_KEY, nextId);
+  return nextId;
 }
 
 export default function Home() {
@@ -93,6 +105,8 @@ export default function Home() {
 
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [currentDevicePushRegistered, setCurrentDevicePushRegistered] = useState(false);
+  const [accountPushSubscriptionCount, setAccountPushSubscriptionCount] = useState(0);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
   const [reservationAssist, setReservationAssist] = useState<ReservationAssistState>(createDefaultReservationAssist());
@@ -228,6 +242,8 @@ export default function Home() {
     if (data.user) {
       setAlertsEnabled(data.preferences.alertsEnabled);
       setPushEnabled(data.preferences.pushEnabled);
+      setCurrentDevicePushRegistered(data.pushDelivery?.currentDeviceRegistered ?? false);
+      setAccountPushSubscriptionCount(data.pushDelivery?.accountSubscriptionCount ?? 0);
       setEmailEnabled(data.preferences.emailEnabled);
       setEmailAddress(data.preferences.emailAddress || data.user.email);
       setSyncFrequency(normalizeSupportedFrequency(data.preferences.syncFrequency));
@@ -249,13 +265,19 @@ export default function Home() {
       setLatestBookingJob(null);
       setImportedDisneyMembers([]);
       setLocalWorkerDevices([]);
+      setCurrentDevicePushRegistered(false);
+      setAccountPushSubscriptionCount(0);
       setAccountSaveState("local");
       setAccountSaveMessage("This wishboard is currently local to this browser.");
     }
   }, []);
 
   const loadDashboardState = useCallback(async () => {
-    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    const browserDeviceId = ensureBrowserDeviceId();
+    const response = await fetch("/api/auth/session", {
+      cache: "no-store",
+      headers: browserDeviceId ? { "x-browser-device-id": browserDeviceId } : undefined,
+    });
     if (!response.ok) return;
 
     const data: DashboardUserState = await response.json();
@@ -276,7 +298,10 @@ export default function Home() {
         }),
       });
 
-      const secondPass = await fetch("/api/auth/session", { cache: "no-store" });
+      const secondPass = await fetch("/api/auth/session", {
+        cache: "no-store",
+        headers: browserDeviceId ? { "x-browser-device-id": browserDeviceId } : undefined,
+      });
       if (secondPass.ok) {
         applyDashboardState(await secondPass.json());
         setHasLoadedServerState(true);
@@ -1179,14 +1204,19 @@ export default function Home() {
         }
 
         if (!subscription) {
-          setPushEnabled(false);
+          setCurrentDevicePushRegistered(false);
           return false;
         }
+
+        const deviceId = ensureBrowserDeviceId();
 
         const response = await fetch("/api/push-subscriptions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(subscription),
+          body: JSON.stringify({
+            deviceId,
+            subscription: subscription.toJSON(),
+          }),
         });
 
         if (!response.ok) {
@@ -1195,9 +1225,11 @@ export default function Home() {
 
         setPushEnabled(true);
         setAlertsEnabled(true);
+        setCurrentDevicePushRegistered(true);
+        setAccountPushSubscriptionCount((current) => Math.max(current, 1));
         return true;
       } catch {
-        setPushEnabled(false);
+        setCurrentDevicePushRegistered(false);
         return false;
       }
     },
@@ -1296,6 +1328,8 @@ export default function Home() {
     await fetch("/api/auth/session", { method: "DELETE" });
     setSessionUser(null);
     setPushEnabled(false);
+    setCurrentDevicePushRegistered(false);
+    setAccountPushSubscriptionCount(0);
     setAuthMessage("");
     setAccountSaveState("local");
     setAccountSaveMessage("This wishboard is now local to this browser.");
@@ -1471,6 +1505,8 @@ export default function Home() {
             onSignOut={() => void signOut()}
             alertsEnabled={alertsEnabled}
             pushEnabled={pushEnabled}
+            currentDevicePushRegistered={currentDevicePushRegistered}
+            accountPushSubscriptionCount={accountPushSubscriptionCount}
             requestNotifications={() => void requestNotifications()}
             emailEnabled={emailEnabled}
             notificationsSupported={notificationsSupported}

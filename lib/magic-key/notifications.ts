@@ -153,7 +153,7 @@ async function sendPushToUser(
   if (subscriptions.length === 0) {
     return {
       ok: false as const,
-      message: "No push subscription is registered for this account on this device yet.",
+      message: "No push subscription is registered for this account yet.",
       sent: 0,
     };
   }
@@ -192,7 +192,7 @@ async function sendPushToUser(
 
   return {
     ok: true as const,
-    message: `Push sent to ${sent} ${sent === 1 ? "subscription" : "subscriptions"}.`,
+    message: `Push sent to ${sent} linked ${sent === 1 ? "device" : "devices"}.`,
     sent,
   };
 }
@@ -249,7 +249,7 @@ export async function sendTestPushForUser(
     userId,
     JSON.stringify({
       title: "Magic Key Monitor",
-      body: "Your test push arrived. This device is ready for watched-date changes.",
+      body: "Your test push arrived. Linked devices for this account should receive it.",
       url: "/?tab=alerts",
     })
   );

@@ -147,6 +147,7 @@ type MagicLinkRecord = {
 type PushSubscriptionRecord = {
   id: string;
   userId: string;
+  deviceId: string;
   endpoint: string;
   expirationTime: number | null;
   keys: {
@@ -1081,7 +1082,10 @@ export async function setSessionCookie(token: string) {
   });
 }
 
-export async function getDashboardStateForUser(user: StoredUser | null): Promise<DashboardUserState> {
+export async function getDashboardStateForUser(
+  user: StoredUser | null,
+  currentDeviceId = ""
+): Promise<DashboardUserState> {
   const state = await readBackendState();
 
   if (!user) {
@@ -1102,10 +1106,18 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
       activity: [],
       syncMeta: state.syncMeta,
       pushPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
+      pushDelivery: {
+        currentDeviceRegistered: false,
+        accountSubscriptionCount: 0,
+      },
     };
   }
 
   const preferences = getPreferencesFromState(state, user.id);
+  const pushSubscriptions = getPushSubscriptionsForUser(state, user.id);
+  const currentDeviceRegistered = Boolean(
+    currentDeviceId && pushSubscriptions.some((subscription) => subscription.deviceId === currentDeviceId)
+  );
   preferences.reservationAssist = normalizeReservationAssist(preferences.reservationAssist, user.email);
   preferences.plannerHubBooking = normalizePlannerHubBooking(preferences.plannerHubBooking);
   preferences.plannerHubConnection = normalizePlannerHubConnection(
@@ -1186,6 +1198,10 @@ export async function getDashboardStateForUser(user: StoredUser | null): Promise
     })),
     syncMeta: state.syncMeta,
     pushPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
+    pushDelivery: {
+      currentDeviceRegistered,
+      accountSubscriptionCount: pushSubscriptions.length,
+    },
   };
 }
 
@@ -1593,8 +1609,17 @@ export async function updateWatchItemForUser(
 
 export async function upsertPushSubscriptionForUser(
   userId: string,
-  subscription: {
-    endpoint: string;
+  payload: {
+    deviceId?: string;
+    subscription?: {
+      endpoint: string;
+      expirationTime?: number | null;
+      keys?: {
+        auth?: string;
+        p256dh?: string;
+      };
+    };
+    endpoint?: string;
     expirationTime?: number | null;
     keys?: {
       auth?: string;
@@ -1602,6 +1627,12 @@ export async function upsertPushSubscriptionForUser(
     };
   }
 ) {
+  const subscription = payload.subscription ?? payload;
+  const deviceId = String(payload.deviceId || "");
+  if (!subscription?.endpoint) {
+    throw new Error("Missing push subscription endpoint.");
+  }
+
   const state = await readBackendState();
   const existing = state.pushSubscriptions.find(
     (item) => item.userId === userId && item.endpoint === subscription.endpoint
@@ -1609,6 +1640,7 @@ export async function upsertPushSubscriptionForUser(
   const now = new Date().toISOString();
 
   if (existing) {
+    existing.deviceId = deviceId || existing.deviceId || "";
     existing.expirationTime = subscription.expirationTime ?? null;
     existing.keys = {
       auth: subscription.keys?.auth ?? existing.keys.auth,
@@ -1619,6 +1651,7 @@ export async function upsertPushSubscriptionForUser(
     state.pushSubscriptions.push({
       id: randomUUID(),
       userId,
+      deviceId,
       endpoint: subscription.endpoint,
       expirationTime: subscription.expirationTime ?? null,
       keys: {
