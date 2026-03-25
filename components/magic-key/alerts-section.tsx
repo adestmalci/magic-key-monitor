@@ -80,7 +80,7 @@ export function AlertsSection({
             ? "This localhost build does not have the deployed push key, so background push only works on the hosted app."
             : "Notifications are allowed, but background push still needs app push configuration."
           : notificationsGranted
-            ? "Notifications are allowed. We will finish background push as soon as this device saves its subscription."
+            ? "Browser notifications are allowed, but closed-app push is not ready until this device saves its push subscription."
             : "Notifications are not enabled yet on this device.";
   const emailToggleLabel = emailEnabled ? "Email alerts on" : "Turn on email alerts";
 
@@ -311,7 +311,7 @@ export function AlertsSection({
                         ? isLocalBuild
                           ? "Push is configured on the hosted app, but this localhost build does not have the public push key."
                           : "Push env vars still need to be configured"
-                        : "This device has not saved a push subscription yet"}
+                        : "No push subscription is saved on this device yet"}
               </div>
             </div>
           </div>

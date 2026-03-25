@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 
       recordActivityForUser(evaluation.state, userId, {
         source: "auto",
-        trigger: "Background scheduler (~5-minute cadence)",
+        trigger: "Background scheduler heartbeat",
         message: summary,
         details: changes.map(({ item, previousStatus, currentStatus }) => {
           const passName = PASS_TYPES.find((row) => row.id === item.passType)?.name ?? item.passType;
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
       for (const user of state.users) {
         recordActivityForUser(state, user.id, {
           source: "auto",
-          trigger: "Background scheduler (~5-minute cadence)",
+          trigger: "Background scheduler heartbeat",
           message: "Wishboard auto-refresh failed before the latest scheduler run could complete.",
           details: [message],
           createdAt: failureAt,

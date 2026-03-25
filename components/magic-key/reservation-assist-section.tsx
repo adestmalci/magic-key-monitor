@@ -1001,13 +1001,14 @@ export function ReservationAssistSection({
           {showHealthyPartySync ? (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
               <div className="flex items-center justify-between gap-3">
-                <div className="font-semibold">Party sync</div>
+                <div className="font-semibold">Connected party import</div>
                 <div className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold">Ready</div>
               </div>
               <p className="mt-2 leading-6">
-                Last synced {formatSyncTime(plannerHubConnection.lastImportFinishedAt || plannerHubConnection.lastImportedAt)}.{" "}
+                Last imported {formatSyncTime(plannerHubConnection.lastImportFinishedAt || plannerHubConnection.lastImportedAt)}.{" "}
                 {plannerHubConnection.lastImportedMemberCount} connected Disney member
-                {plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"} found.
+                {plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"} found. This refreshes when you reconnect,
+                import manually, or right before a booking attempt.
               </p>
             </div>
           ) : (

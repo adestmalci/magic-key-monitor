@@ -31,6 +31,7 @@ export function WatchlistSection({
   onRemoveWatchItem: (id: string) => void;
 }) {
   const frequencyLabel = FREQUENCIES.find((row) => row.value === syncFrequency)?.label ?? "Manual only";
+  const armedCount = watchItems.filter((item) => item.bookingMode === "watch_and_attempt").length;
 
   return (
     <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm">
@@ -69,6 +70,11 @@ export function WatchlistSection({
             >
               {saveStatus.message}
             </div>
+            {armedCount > 0 ? (
+              <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800">
+                {armedCount} watched {armedCount === 1 ? "date is" : "dates are"} armed for auto booking
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -134,6 +140,16 @@ export function WatchlistSection({
 
                       <div className="mt-4 flex flex-wrap gap-2">
                         <StatusBadge status={item.currentStatus} />
+                        {item.bookingMode === "watch_and_attempt" ? (
+                          <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-sm text-violet-900">
+                            Auto booking on
+                          </span>
+                        ) : null}
+                        {item.bookingMode === "watch_and_attempt" ? (
+                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700">
+                            {item.selectedImportedMemberIds.length} selected member{item.selectedImportedMemberIds.length === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
@@ -141,6 +157,11 @@ export function WatchlistSection({
                           <ParkIcon park={item.preferredPark} />
                           {park.label}
                         </span>
+                        {item.preferredPark === "either" && item.eitherParkTieBreaker ? (
+                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700">
+                            {item.eitherParkTieBreaker === "dl" ? "Disneyland first" : "California Adventure first"}
+                          </span>
+                        ) : null}
                         <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700">
                           <Clock3 className="h-4 w-4" />
                           {frequencyLabel}

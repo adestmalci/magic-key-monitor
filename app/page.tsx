@@ -133,6 +133,7 @@ export default function Home() {
   const importedLocalRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
   const passTypeSyncReadyRef = useRef(false);
+  const suppressNextAccountSaveRef = useRef(false);
 
   useEffect(() => {
     watchItemsRef.current = watchItems;
@@ -205,6 +206,7 @@ export default function Home() {
     : "";
 
   const applyDashboardState = useCallback((data: DashboardUserState) => {
+    suppressNextAccountSaveRef.current = true;
     setSessionUser(data.user);
     setPushPublicKey(data.pushPublicKey || "");
     setSyncMeta(data.syncMeta || DEFAULT_SYNC_META);
@@ -451,6 +453,11 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated || !hasLoadedServerState || !sessionUser) return;
 
+    if (suppressNextAccountSaveRef.current) {
+      suppressNextAccountSaveRef.current = false;
+      return;
+    }
+
     setAccountSaveState("saving");
     setAccountSaveMessage(`Saving account preferences for ${sessionUser.email}...`);
 
@@ -533,6 +540,7 @@ export default function Home() {
         const nextMeta = syncMetaFromHeaders(response.headers);
         const attemptedAt = nextMeta.lastAttemptedSyncAt || new Date().toISOString();
         const syncedAt = nextMeta.lastSuccessfulSyncAt || lastSyncAtRef.current;
+        const isServerBackedSession = Boolean(sessionUserRef.current);
 
         let changedCount = 0;
         const changedItems: Array<{
@@ -553,29 +561,31 @@ export default function Home() {
           lastWorkerPollMessage: nextMeta.lastWorkerPollMessage || current.lastWorkerPollMessage,
         }));
 
-        setWatchItems((current) =>
-          current.map((item) => {
-            const nextStatus = resolveWatchItemStatus(item, lookup, importedDisneyMembers);
-            const changed = nextStatus !== item.currentStatus;
+        if (!isServerBackedSession) {
+          setWatchItems((current) =>
+            current.map((item) => {
+              const nextStatus = resolveWatchItemStatus(item, lookup, importedDisneyMembers);
+              const changed = nextStatus !== item.currentStatus;
 
-            if (changed) {
-              changedCount += 1;
-              changedItems.push({
-                date: item.date,
-                passType: item.passType,
-                status: nextStatus,
-                previousStatus: item.currentStatus,
-              });
-            }
+              if (changed) {
+                changedCount += 1;
+                changedItems.push({
+                  date: item.date,
+                  passType: item.passType,
+                  status: nextStatus,
+                  previousStatus: item.currentStatus,
+                });
+              }
 
-            return {
-              ...item,
-              previousStatus: changed ? item.currentStatus : item.previousStatus,
-              currentStatus: nextStatus,
-              lastCheckedAt: attemptedAt || syncedAt || item.lastCheckedAt,
-            };
-          })
-        );
+              return {
+                ...item,
+                previousStatus: changed ? item.currentStatus : item.previousStatus,
+                currentStatus: nextStatus,
+                lastCheckedAt: attemptedAt || syncedAt || item.lastCheckedAt,
+              };
+            })
+          );
+        }
 
         if (syncedAt) {
           setLastSyncAt(syncedAt);
@@ -597,26 +607,33 @@ export default function Home() {
           return `${passName} • ${formatWatchDate(item.date)} • ${STATUS_META[item.previousStatus].compactLabel} -> ${STATUS_META[item.status].compactLabel}`;
         });
 
-        setLastRunSummary(summary);
+        if (isServerBackedSession) {
+          // Signed-in sessions should treat backend evaluation as the source of truth for
+          // watched-date changes, activity, alerts, and booking triggers.
+          setLastRunSummary(`${prefix} ${nextMeta.message}`);
+          await loadDashboardState();
+        } else {
+          setLastRunSummary(summary);
 
-        if (logActivity && source !== "startup") {
-          prependActivity(source, summary, activityDetails, trigger);
-          persistActivityEntry({
-            source,
-            trigger,
-            message: summary,
-            details: activityDetails,
-          });
-        }
+          if (logActivity && source !== "startup") {
+            prependActivity(source, summary, activityDetails, trigger);
+            persistActivityEntry({
+              source,
+              trigger,
+              message: summary,
+              details: activityDetails,
+            });
+          }
 
-        if (alertsEnabledRef.current && changedItems.length > 0 && canNotify() && Notification.permission === "granted") {
-          const first = changedItems[0];
-          const passName = PASS_TYPES.find((item) => item.id === first.passType)?.name ?? first.passType;
-          const statusLabel = STATUS_META[first.status].compactLabel;
+          if (alertsEnabledRef.current && changedItems.length > 0 && canNotify() && Notification.permission === "granted") {
+            const first = changedItems[0];
+            const passName = PASS_TYPES.find((item) => item.id === first.passType)?.name ?? first.passType;
+            const statusLabel = STATUS_META[first.status].compactLabel;
 
-          new Notification("Magic Key update", {
-            body: `${passName} • ${formatWatchDate(first.date)} • ${statusLabel}`,
-          });
+            new Notification("Magic Key update", {
+              body: `${passName} • ${formatWatchDate(first.date)} • ${statusLabel}`,
+            });
+          }
         }
 
         if (source === "manual") {
