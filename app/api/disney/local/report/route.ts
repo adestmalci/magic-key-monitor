@@ -1,5 +1,5 @@
-import { completePlannerHubJob, getUserIdFromLocalWorkerRequest, readBackendState } from "../../../../../lib/magic-key/backend";
-import { sendPlannerHubBookingStatusEmailForUser } from "../../../../../lib/magic-key/notifications";
+import { completePlannerHubJob, getUserIdFromLocalWorkerRequest, readBackendState, recordActivityForUser, writeBackendState } from "../../../../../lib/magic-key/backend";
+import { sendPlannerHubBookingStatusAlertsForUser } from "../../../../../lib/magic-key/notifications";
 
 export async function POST(request: Request) {
   const userId = getUserIdFromLocalWorkerRequest(request);
@@ -31,21 +31,39 @@ export async function POST(request: Request) {
   if (
     result.jobType === "booking" &&
     result.targetWatchDate &&
-    (result.status === "paused_login" || result.status === "paused_mismatch" || result.status === "failed")
+    (result.status === "booked" ||
+      result.status === "paused_login" ||
+      result.status === "paused_mismatch" ||
+      result.status === "failed")
   ) {
     const state = await readBackendState();
-    await sendPlannerHubBookingStatusEmailForUser(state, result.userId, {
+    const summary =
+      result.resultMessage || "The latest Disney booking attempt needs attention.";
+    const nextStep =
+      result.requiredActionMessage ||
+      (result.status === "paused_mismatch"
+        ? "Refresh the connected party and reselect the Magic Key targets before the next attempt."
+        : result.status === "paused_login"
+          ? "Reconnect Disney on your Mac before the next attempt."
+          : "Open Reserve to review the latest booking result.");
+    const delivery = await sendPlannerHubBookingStatusAlertsForUser(state, result.userId, {
       watchDate: result.targetWatchDate,
       status: result.status,
-      summary: result.resultMessage || "The latest Disney booking attempt needs attention.",
-      nextStep:
-        result.requiredActionMessage ||
-        (result.status === "paused_mismatch"
-          ? "Refresh the connected party and reselect the Magic Key targets before the next attempt."
-          : result.status === "paused_login"
-            ? "Reconnect Disney on your Mac before the next attempt."
-            : "Open Reserve to review the latest booking result."),
+      summary,
+      nextStep,
     });
+    recordActivityForUser(state, result.userId, {
+      source: "system",
+      trigger: "Booking result delivery",
+      message: `Disney booking result recorded for ${result.targetWatchDate}.`,
+      details: [
+        `Status: ${result.status}`,
+        `Summary: ${summary}`,
+        `Email: ${delivery.email.attempted ? (delivery.email.ok ? "sent" : "failed") : "skipped"} • ${delivery.email.message}`,
+        `Push: ${delivery.push.attempted ? (delivery.push.ok ? "sent" : "failed") : "skipped"} • ${delivery.push.message}`,
+      ],
+    });
+    await writeBackendState(state);
   }
 
   return Response.json({ ok: true });

@@ -24,6 +24,19 @@ export type AlertDeliverySummary = {
   };
 };
 
+export type BookingStatusDeliverySummary = {
+  email: {
+    attempted: boolean;
+    ok: boolean;
+    message: string;
+  };
+  push: {
+    attempted: boolean;
+    ok: boolean;
+    message: string;
+  };
+};
+
 function createEmailHtml(email: string, changes: AlertChange[]) {
   const cards = changes
     .map(({ item, previousStatus, currentStatus }) => {
@@ -106,6 +119,21 @@ function createPushPayload(changes: AlertChange[]) {
     title: "Magic Key Monitor",
     body: `${pass} • ${formatWatchDate(first.item.date)} changed to ${STATUS_META[first.currentStatus].compactLabel}${suffix}`,
     url: "/",
+  });
+}
+
+function createBookingStatusPushPayload(payload: {
+  watchDate: string;
+  status: "booked" | "paused_login" | "paused_mismatch" | "failed";
+  summary: string;
+}) {
+  return JSON.stringify({
+    title: "Magic Key Monitor",
+    body:
+      payload.status === "booked"
+        ? `Reservation booked for ${formatWatchDate(payload.watchDate)}`
+        : payload.summary,
+    url: "/?tab=reserve",
   });
 }
 
@@ -372,4 +400,83 @@ export async function sendPlannerHubBookingStatusEmailForUser(
           : `Disney booking failed for ${formatWatchDate(payload.watchDate)}`;
 
   return sendEmail(emailTarget, subject, createBookingStatusEmailHtml(emailTarget, payload));
+}
+
+export async function sendPlannerHubBookingStatusAlertsForUser(
+  state: Awaited<ReturnType<typeof import("./backend").readBackendState>>,
+  userId: string,
+  payload: {
+    watchDate: string;
+    status: "booked" | "paused_login" | "paused_mismatch" | "failed";
+    summary: string;
+    nextStep: string;
+  }
+): Promise<BookingStatusDeliverySummary> {
+  const user = getUserFromState(state, userId);
+  if (!user) {
+    return {
+      email: {
+        attempted: false,
+        ok: false,
+        message: "We couldn't find that signed-in account.",
+      },
+      push: {
+        attempted: false,
+        ok: false,
+        message: "We couldn't find that signed-in account.",
+      },
+    };
+  }
+
+  const preferences = getPreferencesFromState(state, userId);
+  const emailTarget = preferences.emailAddress || user.email;
+  let emailSummary: BookingStatusDeliverySummary["email"] = {
+    attempted: false,
+    ok: false,
+    message: "Email alerts are disabled for this account.",
+  };
+  let pushSummary: BookingStatusDeliverySummary["push"] = {
+    attempted: false,
+    ok: false,
+    message: "Push alerts are disabled for this account.",
+  };
+
+  if (preferences.emailEnabled && emailTarget) {
+    try {
+      const result = await sendPlannerHubBookingStatusEmailForUser(state, userId, payload);
+      emailSummary = {
+        attempted: true,
+        ok: result.ok,
+        message: result.message,
+      };
+    } catch (error) {
+      emailSummary = {
+        attempted: true,
+        ok: false,
+        message: error instanceof Error ? error.message : "Email delivery failed.",
+      };
+    }
+  }
+
+  if (preferences.pushEnabled) {
+    try {
+      const result = await sendPushToUser(state, userId, createBookingStatusPushPayload(payload));
+      pushSummary = {
+        attempted: true,
+        ok: result.ok,
+        message: result.message,
+      };
+    } catch (error) {
+      pushSummary = {
+        attempted: true,
+        ok: false,
+        message: error instanceof Error ? error.message : "Push delivery failed.",
+      };
+    }
+  }
+
+  return {
+    email: emailSummary,
+    push: pushSummary,
+  };
 }

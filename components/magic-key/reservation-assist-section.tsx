@@ -730,6 +730,54 @@ export function ReservationAssistSection({
       return bookingReadiness;
     }
 
+    const bookingResultTargetsCurrent =
+      plannerHubBooking.lastBookedWatchItemId === currentTarget.id ||
+      latestBookingJob?.targetWatchItemId === currentTarget.id ||
+      (!plannerHubBooking.lastBookedWatchItemId && !latestBookingJob?.targetWatchItemId);
+
+    if (bookingResultTargetsCurrent && plannerHubBooking.status === "paused_mismatch") {
+      return {
+        label: "Party changed",
+        tone: "border-rose-200 bg-rose-50 text-rose-900",
+        message:
+          plannerHubBooking.lastRequiredActionMessage ||
+          plannerHubBooking.lastResultMessage ||
+          "The connected Disney party or watched-date target changed before the booking attempt could continue.",
+      };
+    }
+
+    if (bookingResultTargetsCurrent && plannerHubBooking.status === "paused_login") {
+      return {
+        label: "Reconnect Disney",
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        message:
+          plannerHubBooking.lastRequiredActionMessage ||
+          plannerHubBooking.lastResultMessage ||
+          "Reconnect Disney on your Mac before another booking attempt can continue.",
+      };
+    }
+
+    if (bookingResultTargetsCurrent && plannerHubBooking.status === "failed") {
+      return {
+        label: "Booking failed",
+        tone: "border-rose-200 bg-rose-50 text-rose-900",
+        message:
+          plannerHubBooking.lastRequiredActionMessage ||
+          plannerHubBooking.lastResultMessage ||
+          "The latest booking attempt failed. Review the latest result before retrying.",
+      };
+    }
+
+    if (bookingResultTargetsCurrent && plannerHubBooking.status === "booked") {
+      return {
+        label: "Booked",
+        tone: "border-emerald-200 bg-emerald-50 text-emerald-900",
+        message:
+          plannerHubBooking.lastResultMessage ||
+          `Reservation booked for ${formatWatchDate(currentTarget.date)}.`,
+      };
+    }
+
     const currentBookingIsActive =
       bookingJobActive &&
       (!latestBookingJob?.targetWatchItemId || latestBookingJob.targetWatchItemId === currentTarget.id);
@@ -774,9 +822,12 @@ export function ReservationAssistSection({
     currentTargetNeedsTieBreaker,
     latestBookingJob?.lastMessage,
     latestBookingJob?.targetWatchItemId,
+    plannerHubBooking.lastRequiredActionMessage,
+    plannerHubBooking.lastResultMessage,
     plannerHubBooking.lastBookedWatchItemId,
     plannerHubBooking.lastBookingMessage,
     plannerHubBooking.lastBookingStatus,
+    plannerHubBooking.status,
     targetAutoBookingEnabled,
   ]);
 
