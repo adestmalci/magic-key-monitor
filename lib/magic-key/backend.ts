@@ -136,6 +136,16 @@ type PlannerHubClaimResult = {
   diagnostics: PlannerHubJobDiagnostics;
 } | null;
 
+type PlannerHubBookingRecovery = {
+  userId: string;
+  targetWatchDate: string;
+  status: "failed";
+  summary: string;
+  nextStep: string;
+  activityMessage: string;
+  activityDetails: string[];
+};
+
 type MagicLinkRecord = {
   id: string;
   userId: string;
@@ -193,6 +203,15 @@ const MAX_ACTIVITY_ITEMS_PER_USER = 40;
 const JOB_RETENTION_MS = 1000 * 60 * 60 * 24 * 7;
 const DISNEY_PENDING_PASSWORD_TTL_MS = 1000 * 60 * 15;
 const PLANNER_HUB_JOB_STALE_MS = 1000 * 60 * 10;
+const PLANNER_HUB_BOOKING_PHASE_TIMEOUT_MS: Partial<Record<DisneyWorkerPhase, number>> = {
+  started: 1000 * 45,
+  disney_open: 1000 * 60,
+  email_step: 1000 * 60,
+  password_step: 1000 * 90,
+  select_party: 1000 * 75,
+  members_imported: 1000 * 45,
+  session_captured: 1000 * 45,
+};
 const LOCAL_DEVICE_STALE_MS = 1000 * 60 * 10;
 const LOCAL_WORKER_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const DISNEY_IMPORT_FRESHNESS_MS = 1000 * 60 * 15;
@@ -1138,7 +1157,12 @@ export async function getDashboardStateForUser(
     preferences.plannerHubConnection,
     getActiveLocalWorkerDevice(state, user.id)
   );
-  if (synchronizePlannerHubConnectionState(state, user.id, preferences) || synchronizePlannerHubBookingState(state, user.id, preferences)) {
+  const bookingRecovery = synchronizePlannerHubBookingState(state, user.id, preferences);
+  const connectionChanged = synchronizePlannerHubConnectionState(state, user.id, preferences);
+  if (connectionChanged || bookingRecovery.changed) {
+    if (bookingRecovery.recovery) {
+      await deliverPlannerHubBookingRecovery(state, bookingRecovery.recovery);
+    }
     await writeBackendState(state);
   }
   const latestDisneyJob = getLatestPlannerHubJobForUser(
@@ -2060,8 +2084,103 @@ function appendJobEvent(job: PlannerHubJobRecord, phase: DisneyWorkerPhase, mess
 
 function isPlannerHubJobStale(job: PlannerHubJobRecord | null) {
   if (!job) return true;
-  const reference = job.claimedAt || job.queuedAt;
+  const reference = job.updatedAt || job.claimedAt || job.queuedAt;
   return Date.now() - Date.parse(reference) > PLANNER_HUB_JOB_STALE_MS;
+}
+
+function getPlannerHubJobFreshnessAnchor(job: PlannerHubJobRecord | null) {
+  if (!job) return "";
+  return job.updatedAt || job.claimedAt || job.startedAt || job.queuedAt;
+}
+
+function getPlannerHubBookingPhaseTimeoutMs(phase: DisneyWorkerPhase | "") {
+  if (!phase) return PLANNER_HUB_JOB_STALE_MS;
+  return PLANNER_HUB_BOOKING_PHASE_TIMEOUT_MS[phase] || PLANNER_HUB_JOB_STALE_MS;
+}
+
+function getPlannerHubBookingRecoveryPayload(job: PlannerHubJobRecord | null) {
+  if (!job) {
+    return {
+      summary: "The Disney booking attempt stopped reporting before completion.",
+      nextStep:
+        "Refresh status, then retry the booking if Disney is still available. If needed, reconnect Disney on the active Mac first.",
+      activityMessage: "Booking attempt timed out before the worker could report a final Disney result.",
+      activityDetails: ["No active Disney booking job record could be found for the last attempted watch target."],
+    };
+  }
+
+  if (job.status === "queued") {
+    return {
+      summary: "The queued Disney booking attempt was never claimed by the local worker in time.",
+      nextStep:
+        "Make sure the local Disney worker is running on your Mac, then retry the booking if this watched date is still available.",
+      activityMessage: `Booking attempt timed out while waiting for the local worker to claim ${job.targetWatchDate || "the watched date"}.`,
+      activityDetails: [
+        `Latest phase: ${job.phase || "queued"}`,
+        "The booking never moved past the queued state before the timeout threshold.",
+      ],
+    };
+  }
+
+  if (job.phase === "select_party") {
+    return {
+      summary: "Disney select-party step stopped responding before the booking attempt could finish.",
+      nextStep:
+        "Refresh status, then retry the booking if Disney is still available. If this keeps happening, reconnect Disney on the active Mac first.",
+      activityMessage: `Booking attempt timed out in Disney select-party for ${job.targetWatchDate || "the watched date"}.`,
+      activityDetails: [
+        "The worker reached Disney's select-party step but did not report a final result in time.",
+        `Latest worker note: ${job.lastMessage || "Disney select-party was still opening."}`,
+      ],
+    };
+  }
+
+  if (job.phase === "members_imported") {
+    return {
+      summary: "Disney stalled after the party was selected and before confirmation could be detected.",
+      nextStep:
+        "Refresh status, then retry the booking if Disney is still available. If needed, reopen the Disney flow on the active Mac first.",
+      activityMessage: `Booking attempt timed out after selecting party members for ${job.targetWatchDate || "the watched date"}.`,
+      activityDetails: [
+        `Latest worker note: ${job.lastMessage || "The targeted Disney party was already selected."}`,
+      ],
+    };
+  }
+
+  return {
+    summary: "The Disney booking attempt stopped responding before completion.",
+    nextStep:
+      "Refresh status, then retry the booking if Disney is still available. If needed, reconnect Disney on the active Mac first.",
+    activityMessage: `Booking attempt timed out while processing ${job.targetWatchDate || "the watched date"}.`,
+    activityDetails: [
+      `Latest phase: ${job.phase || "processing"}`,
+      `Latest worker note: ${job.lastMessage || "The worker was still reporting an active booking attempt."}`,
+    ],
+  };
+}
+
+async function deliverPlannerHubBookingRecovery(
+  state: BackendState,
+  recovery: PlannerHubBookingRecovery
+) {
+  const { sendPlannerHubBookingStatusAlertsForUser } = await import("./notifications");
+  const delivery = await sendPlannerHubBookingStatusAlertsForUser(state, recovery.userId, {
+    watchDate: recovery.targetWatchDate,
+    status: recovery.status,
+    summary: recovery.summary,
+    nextStep: recovery.nextStep,
+  });
+
+  recordActivityForUser(state, recovery.userId, {
+    source: "system",
+    trigger: "Booking timeout recovery",
+    message: recovery.activityMessage,
+    details: [
+      ...recovery.activityDetails,
+      `Email: ${delivery.email.attempted ? (delivery.email.ok ? "sent" : "failed") : "skipped"} • ${delivery.email.message}`,
+      `Push: ${delivery.push.attempted ? (delivery.push.ok ? "sent" : "failed") : "skipped"} • ${delivery.push.message}`,
+    ],
+  });
 }
 
 function synchronizePlannerHubConnectionState(
@@ -2135,36 +2254,50 @@ function synchronizePlannerHubBookingState(
   state: BackendState,
   userId: string,
   preferences: StoredPreferences
-) {
+): { changed: boolean; recovery: PlannerHubBookingRecovery | null } {
   const booking = preferences.plannerHubBooking;
   if (booking.status !== "attempting" && booking.lastBookingStatus !== "processing") {
-    return false;
+    return { changed: false, recovery: null as PlannerHubBookingRecovery | null };
   }
 
   const job = booking.lastBookingJobId ? findPlannerHubJob(state, booking.lastBookingJobId) : null;
 
   if (job?.status === "completed" || job?.status === "failed") {
-    return false;
+    return { changed: false, recovery: null as PlannerHubBookingRecovery | null };
   }
 
-  if (
+  const nowMs = Date.now();
+  const anchor = getPlannerHubJobFreshnessAnchor(job);
+  const phaseTimedOut =
+    Boolean(job && anchor) &&
+    nowMs - Date.parse(anchor) > getPlannerHubBookingPhaseTimeoutMs(job?.phase || "");
+  const genericStale =
     !job ||
-    ((job.status === "queued" || job.status === "processing") && isPlannerHubJobStale(job))
+    ((job.status === "queued" || job.status === "processing") && isPlannerHubJobStale(job));
+
+  if (
+    phaseTimedOut ||
+    genericStale
   ) {
     const staleAt = new Date().toISOString();
+    const recoveryPayload = getPlannerHubBookingRecoveryPayload(job);
+    const recoveryWatchDate =
+      job?.targetWatchDate ||
+      state.watchItems.find((item) => item.userId === userId && item.id === booking.lastBookedWatchItemId)?.date ||
+      "";
     if (job && (job.status === "queued" || job.status === "processing")) {
       job.status = "failed";
       job.phase = "failed";
       job.finishedAt = staleAt;
       job.updatedAt = staleAt;
-      job.lastError = job.lastError || "The Disney booking attempt stopped reporting before completion.";
-      job.lastMessage = job.lastMessage || job.lastError;
+      job.lastError = recoveryPayload.summary;
+      job.lastMessage = recoveryPayload.summary;
       job.events = [
         ...normalizeDisneyWorkerEvents(job.events),
         {
           phase: "failed",
           at: staleAt,
-          message: job.lastMessage,
+          message: recoveryPayload.summary,
         },
       ];
     }
@@ -2174,18 +2307,40 @@ function synchronizePlannerHubBookingState(
       status: "failed",
       lastBookingStatus: "failed",
       lastBookingFinishedAt: staleAt,
-      lastBookingError: booking.lastBookingError || job?.lastError || "The Disney booking attempt stopped reporting before completion.",
-      lastBookingMessage:
-        booking.lastBookingMessage || job?.lastMessage || "The Disney booking attempt stopped reporting before completion.",
-      lastResultMessage:
-        booking.lastResultMessage || "The Disney booking attempt stopped reporting before completion.",
-      lastRequiredActionMessage:
-        "Refresh status, then retry the booking if Disney is still available. If needed, reconnect Disney on the active Mac first.",
+      lastBookingError: recoveryPayload.summary,
+      lastBookingMessage: recoveryPayload.summary,
+      lastResultMessage: recoveryPayload.summary,
+      lastRequiredActionMessage: recoveryPayload.nextStep,
     });
-    return true;
+    preferences.plannerHubConnection = normalizePlannerHubConnection(
+      {
+        ...preferences.plannerHubConnection,
+        latestJobStatus: "failed",
+        latestPhase: "failed",
+        latestPhaseMessage: recoveryPayload.summary,
+        latestPhaseAt: staleAt,
+        latestJobUpdatedAt: staleAt,
+        lastReportedJobId: job?.id || preferences.plannerHubConnection.lastReportedJobId,
+        lastRequiredActionMessage: recoveryPayload.nextStep,
+      },
+      preferences.plannerHubConnection.disneyEmail
+    );
+
+    return {
+      changed: true,
+      recovery: {
+        userId,
+        targetWatchDate: recoveryWatchDate,
+        status: "failed" as const,
+        summary: recoveryPayload.summary,
+        nextStep: recoveryPayload.nextStep,
+        activityMessage: recoveryPayload.activityMessage,
+        activityDetails: recoveryPayload.activityDetails,
+      },
+    };
   }
 
-  return false;
+  return { changed: false, recovery: null as PlannerHubBookingRecovery | null };
 }
 
 export async function queuePlannerHubConnectJob(userId: string, disneyEmail: string, password: string) {
@@ -3421,13 +3576,23 @@ export async function getPlannerHubDiagnosticsForUser(userId: string) {
 export async function getDisneyStatusForUser(user: StoredUser | null) {
   const state = await readBackendState();
   const preferences = user ? getPreferencesFromState(state, user.id) : null;
-  const plannerHubConnection = user
-    ? applyActiveDeviceToConnection(preferences!.plannerHubConnection, getActiveLocalWorkerDevice(state, user.id))
-    : createDefaultPlannerHubConnection();
+  if (user) {
+    preferences!.plannerHubConnection = applyActiveDeviceToConnection(
+      preferences!.plannerHubConnection,
+      getActiveLocalWorkerDevice(state, user.id)
+    );
+  }
+  const plannerHubConnection = user ? preferences!.plannerHubConnection : createDefaultPlannerHubConnection();
   const reservationAssist = user ? preferences!.reservationAssist : createDefaultReservationAssist();
   const importedDisneyMembers = user ? preferences!.importedDisneyMembers : [];
-  if (user && synchronizePlannerHubBookingState(state, user.id, preferences!)) {
-    await writeBackendState(state);
+  if (user) {
+    const bookingRecovery = synchronizePlannerHubBookingState(state, user.id, preferences!);
+    if (bookingRecovery.changed) {
+      if (bookingRecovery.recovery) {
+        await deliverPlannerHubBookingRecovery(state, bookingRecovery.recovery);
+      }
+      await writeBackendState(state);
+    }
   }
   const latestDisneyJob = user
     ? getLatestPlannerHubJobForUser(state, user.id, plannerHubConnection.plannerHubId || "primary")

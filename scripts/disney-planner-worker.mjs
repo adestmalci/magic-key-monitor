@@ -15,6 +15,25 @@ const DEFAULT_WORKER_SECRET = process.env.WORKER_SECRET || process.env.CRON_SECR
 const SELECT_PARTY_URL = "https://disneyland.disney.go.com/entry-reservation/add/select-party/";
 const PROFILE_URL = "https://disneyland.disney.go.com/profile/";
 const DISNEY_HOME_URL = "https://disneyland.disney.go.com/";
+const BOOKING_PHASE_TIMEOUT_MS = {
+  select_party: 1000 * 75,
+  members_imported: 1000 * 45,
+};
+
+class DisneyBookingStepTimeoutError extends Error {
+  constructor(phase, timeoutMs) {
+    const stepLabel =
+      phase === "select_party"
+        ? "Disney select-party"
+        : phase === "members_imported"
+          ? "the post-selection confirmation step"
+          : "the Disney booking flow";
+    super(`${stepLabel} stopped responding before the booking attempt could finish.`);
+    this.name = "DisneyBookingStepTimeoutError";
+    this.phase = phase;
+    this.timeoutMs = timeoutMs;
+  }
+}
 
 function assertWorkerEnv(appUrl, workerSecret) {
   if (!appUrl) throw new Error("Missing MAGIC_KEY_APP_URL");
@@ -600,7 +619,29 @@ async function handleBooking(job, payload, progress, profileDir) {
   const page = context.pages()[0] || (await context.newPage());
 
   try {
-    const imported = await scrapeConnectedMembers(page, progress);
+    const runBookingStep = async (phase, task) => {
+      const timeoutMs = BOOKING_PHASE_TIMEOUT_MS[phase] || 1000 * 60;
+      let timeoutId;
+      try {
+        return await Promise.race([
+          task(),
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(async () => {
+              try {
+                await context.close();
+              } catch {
+                // ignore close errors during timeout recovery
+              }
+              reject(new DisneyBookingStepTimeoutError(phase, timeoutMs));
+            }, timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
+    const imported = await runBookingStep("select_party", () => scrapeConnectedMembers(page, progress));
     if (!imported.ok) {
       return {
         ok: false,
@@ -673,7 +714,7 @@ async function handleBooking(job, payload, progress, profileDir) {
       };
     }
 
-    const selection = await selectBookingTargetRows(page, selectedMembers);
+    const selection = await runBookingStep("select_party", () => selectBookingTargetRows(page, selectedMembers));
     const bookingDiagnostics = {
       ...(imported.diagnostics || {}),
       targetWatchDate: payload.bookingTarget?.watchDate || "",
@@ -704,8 +745,10 @@ async function handleBooking(job, payload, progress, profileDir) {
       `Matched ${selection.matchedMembers.length} targeted Magic Key member${selection.matchedMembers.length === 1 ? "" : "s"} for ${payload.bookingTarget?.watchDate || "the watched date"}.`
     );
 
-    const advanced = await clickBookingContinue(page);
-    const outcome = await determineBookingOutcome(page);
+    const { advanced, outcome } = await runBookingStep("members_imported", async () => ({
+      advanced: await clickBookingContinue(page),
+      outcome: await determineBookingOutcome(page),
+    }));
 
     if (!advanced && !outcome.ok) {
       return {
@@ -738,6 +781,19 @@ async function handleBooking(job, payload, progress, profileDir) {
             : outcome.reason,
       note: outcome.ok ? outcome.note : outcome.reason,
     };
+  } catch (error) {
+    if (error instanceof DisneyBookingStepTimeoutError) {
+      return {
+        ok: false,
+        status: "failed",
+        hasLocalSession: true,
+        lastAuthFailureReason: error.message,
+        lastRequiredActionMessage:
+          "Refresh status, then retry the booking if Disney is still available. If the worker keeps timing out, reconnect Disney on the active Mac first.",
+        note: error.message,
+      };
+    }
+    throw error;
   } finally {
     await context.close();
   }

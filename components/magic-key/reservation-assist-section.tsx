@@ -586,6 +586,11 @@ export function ReservationAssistSection({
     (importState === "completed" && plannerHubConnection.lastImportedMemberCount === 0 && Boolean(plannerHubConnection.lastImportJobId));
   const showHealthyPartySync = minimalConnectedState && importState === "completed" && plannerHubConnection.lastImportedMemberCount > 0;
   const bookingState = plannerHubBooking.lastBookingStatus || (bookingJobActive ? "processing" : "");
+  const bookingTimedOut =
+    plannerHubBooking.status === "failed" &&
+    /stopped responding|timed out/i.test(
+      `${plannerHubBooking.lastBookingError} ${plannerHubBooking.lastBookingMessage} ${plannerHubBooking.lastResultMessage}`
+    );
   const showBookingAttemptCard =
     bookingJobActive ||
     plannerHubBooking.status === "booked" ||
@@ -601,7 +606,9 @@ export function ReservationAssistSection({
         : plannerHubBooking.status === "paused_mismatch"
           ? "Paused for mismatch"
           : plannerHubBooking.status === "failed"
-            ? "Booking failed"
+            ? bookingTimedOut
+              ? "Booking timed out"
+              : "Booking failed"
             : bookingJobActive || plannerHubBooking.status === "attempting"
               ? "Booking in progress"
               : "Ready";
@@ -758,8 +765,11 @@ export function ReservationAssistSection({
     }
 
     if (bookingResultTargetsCurrent && plannerHubBooking.status === "failed") {
+      const timedOut = /stopped responding|timed out/i.test(
+        `${plannerHubBooking.lastBookingError} ${plannerHubBooking.lastBookingMessage} ${plannerHubBooking.lastResultMessage}`
+      );
       return {
-        label: "Booking failed",
+        label: timedOut ? "Booking timed out" : "Booking failed",
         tone: "border-rose-200 bg-rose-50 text-rose-900",
         message:
           plannerHubBooking.lastRequiredActionMessage ||
