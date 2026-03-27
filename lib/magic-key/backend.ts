@@ -1138,7 +1138,7 @@ export async function getDashboardStateForUser(
     preferences.plannerHubConnection,
     getActiveLocalWorkerDevice(state, user.id)
   );
-  if (synchronizePlannerHubConnectionState(state, user.id, preferences)) {
+  if (synchronizePlannerHubConnectionState(state, user.id, preferences) || synchronizePlannerHubBookingState(state, user.id, preferences)) {
     await writeBackendState(state);
   }
   const latestDisneyJob = getLatestPlannerHubJobForUser(
@@ -2125,6 +2125,63 @@ function synchronizePlannerHubConnectionState(
       },
       connection.disneyEmail
     );
+    return true;
+  }
+
+  return false;
+}
+
+function synchronizePlannerHubBookingState(
+  state: BackendState,
+  userId: string,
+  preferences: StoredPreferences
+) {
+  const booking = preferences.plannerHubBooking;
+  if (booking.status !== "attempting" && booking.lastBookingStatus !== "processing") {
+    return false;
+  }
+
+  const job = booking.lastBookingJobId ? findPlannerHubJob(state, booking.lastBookingJobId) : null;
+
+  if (job?.status === "completed" || job?.status === "failed") {
+    return false;
+  }
+
+  if (
+    !job ||
+    ((job.status === "queued" || job.status === "processing") && isPlannerHubJobStale(job))
+  ) {
+    const staleAt = new Date().toISOString();
+    if (job && (job.status === "queued" || job.status === "processing")) {
+      job.status = "failed";
+      job.phase = "failed";
+      job.finishedAt = staleAt;
+      job.updatedAt = staleAt;
+      job.lastError = job.lastError || "The Disney booking attempt stopped reporting before completion.";
+      job.lastMessage = job.lastMessage || job.lastError;
+      job.events = [
+        ...normalizeDisneyWorkerEvents(job.events),
+        {
+          phase: "failed",
+          at: staleAt,
+          message: job.lastMessage,
+        },
+      ];
+    }
+
+    preferences.plannerHubBooking = normalizePlannerHubBooking({
+      ...booking,
+      status: "failed",
+      lastBookingStatus: "failed",
+      lastBookingFinishedAt: staleAt,
+      lastBookingError: booking.lastBookingError || job?.lastError || "The Disney booking attempt stopped reporting before completion.",
+      lastBookingMessage:
+        booking.lastBookingMessage || job?.lastMessage || "The Disney booking attempt stopped reporting before completion.",
+      lastResultMessage:
+        booking.lastResultMessage || "The Disney booking attempt stopped reporting before completion.",
+      lastRequiredActionMessage:
+        "Refresh status, then retry the booking if Disney is still available. If needed, reconnect Disney on the active Mac first.",
+    });
     return true;
   }
 
@@ -3369,6 +3426,9 @@ export async function getDisneyStatusForUser(user: StoredUser | null) {
     : createDefaultPlannerHubConnection();
   const reservationAssist = user ? preferences!.reservationAssist : createDefaultReservationAssist();
   const importedDisneyMembers = user ? preferences!.importedDisneyMembers : [];
+  if (user && synchronizePlannerHubBookingState(state, user.id, preferences!)) {
+    await writeBackendState(state);
+  }
   const latestDisneyJob = user
     ? getLatestPlannerHubJobForUser(state, user.id, plannerHubConnection.plannerHubId || "primary")
     : null;
