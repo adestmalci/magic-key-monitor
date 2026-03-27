@@ -164,7 +164,7 @@ export function WatchlistSection({
                         ) : null}
                         <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700">
                           <Clock3 className="h-4 w-4" />
-                          {frequencyLabel}
+                          {syncFrequency === "manual" ? frequencyLabel : `Baseline: ${frequencyLabel}`}
                         </span>
                       </div>
 

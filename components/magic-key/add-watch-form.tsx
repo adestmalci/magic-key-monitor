@@ -296,6 +296,10 @@ export function AddWatchForm({
                 </option>
               ))}
             </select>
+            <span className="text-xs leading-5 text-zinc-500">
+              Calm watched dates use this baseline. Armed, near-term, or freshly changed dates temporarily speed up
+              automatically on the backend.
+            </span>
           </label>
 
           <button

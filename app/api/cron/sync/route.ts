@@ -1,4 +1,4 @@
-import { evaluateWatchItemsAgainstFeed, recordActivityForUser, writeBackendState } from "../../../../lib/magic-key/backend";
+import { evaluateWatchItemsAgainstFeed, readBackendState, recordActivityForUser, writeBackendState } from "../../../../lib/magic-key/backend";
 import { PASS_TYPES, STATUS_META } from "../../../../lib/magic-key/config";
 import { syncLiveFeed } from "../../../../lib/magic-key/live-sync";
 import { sendAlertsForChanges } from "../../../../lib/magic-key/notifications";
@@ -70,7 +70,41 @@ export async function GET(request: Request) {
     };
 
     await writeBackendState(evaluation.state);
-    await sendAlertsForChanges(evaluation.state, evaluation.changesByUser);
+    const deliverySummaries = await sendAlertsForChanges(evaluation.state, evaluation.changesByUser);
+
+    if (deliverySummaries.length > 0) {
+      const latestState = await readBackendState();
+      const deliveryAt = syncMeta.lastSuccessfulSyncAt || new Date().toISOString();
+
+      for (const summary of deliverySummaries) {
+        const changes = evaluation.changesByUser.get(summary.userId) ?? [];
+        if (changes.length === 0) continue;
+
+        const details: string[] = [];
+
+        if (summary.email.attempted) {
+          details.push(`Email: ${summary.email.ok ? "sent" : "failed"} • ${summary.email.message}`);
+        } else {
+          details.push("Email: skipped");
+        }
+
+        if (summary.push.attempted) {
+          details.push(`Push: ${summary.push.ok ? "sent" : "failed"} • ${summary.push.message}`);
+        } else {
+          details.push("Push: skipped");
+        }
+
+        recordActivityForUser(latestState, summary.userId, {
+          source: "auto",
+          trigger: "Alert delivery fanout",
+          message: `Watched-date delivery ran for ${changes.length} changed ${changes.length === 1 ? "date" : "dates"} on this scheduler heartbeat.`,
+          details,
+          createdAt: deliveryAt,
+        });
+      }
+
+      await writeBackendState(latestState);
+    }
 
     return Response.json({
       ok: true,

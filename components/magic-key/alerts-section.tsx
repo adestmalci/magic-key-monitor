@@ -188,6 +188,9 @@ export function AlertsSection({
             <p className="mt-2 text-sm text-zinc-500">
               Use this email for watched-date changes. Sign in if you want the address and preference to stay attached to your account everywhere.
             </p>
+            <p className="mt-2 text-xs leading-5 text-zinc-500">
+              Watched-date emails go out on the next scheduler heartbeat that detects a real backend change.
+            </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
@@ -251,6 +254,9 @@ export function AlertsSection({
             </div>
             <p className="mt-2 text-sm text-zinc-500">
               One permission flow handles both local browser notifications and, when possible, closed-app push on this signed-in device.
+            </p>
+            <p className="mt-2 text-xs leading-5 text-zinc-500">
+              Watched-date push alerts fire from the same backend detection event as Activity and booking queueing, not from the open tab.
             </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">

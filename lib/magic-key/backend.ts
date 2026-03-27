@@ -57,6 +57,8 @@ type StoredWatchItem = WatchItem & {
 type StoredPreferences = UserPreferences & {
   userId: string;
   lastEvaluatedAt: string;
+  evaluationHotUntil: string;
+  lastMeaningfulChangeAt: string;
   reservationAssist: ReservationAssistState;
   plannerHubBooking: PlannerHubBookingState;
   plannerHubConnection: PlannerHubConnectionState;
@@ -194,6 +196,8 @@ const PLANNER_HUB_JOB_STALE_MS = 1000 * 60 * 10;
 const LOCAL_DEVICE_STALE_MS = 1000 * 60 * 10;
 const LOCAL_WORKER_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const DISNEY_IMPORT_FRESHNESS_MS = 1000 * 60 * 15;
+const HOT_EVALUATION_WINDOW_MS = 1000 * 60 * 15;
+const HOT_WATCH_LOOKAHEAD_DAYS = 3;
 
 const DEFAULT_SYNC_META: SyncMeta = {
   lastSuccessfulSyncAt: "",
@@ -923,6 +927,8 @@ export function getPreferencesFromState(state: BackendState, userId: string): St
 
   if (existing) {
     existing.syncFrequency = normalizeSupportedFrequency(existing.syncFrequency);
+    existing.evaluationHotUntil = existing.evaluationHotUntil || "";
+    existing.lastMeaningfulChangeAt = existing.lastMeaningfulChangeAt || "";
     existing.reservationAssist = normalizeReservationAssist(existing.reservationAssist, user?.email ?? "");
     existing.plannerHubBooking = normalizePlannerHubBooking(existing.plannerHubBooking);
     existing.plannerHubConnection = normalizePlannerHubConnection(
@@ -937,6 +943,8 @@ export function getPreferencesFromState(state: BackendState, userId: string): St
   const created: StoredPreferences = {
     userId,
     lastEvaluatedAt: "",
+    evaluationHotUntil: "",
+    lastMeaningfulChangeAt: "",
     ...defaultPreferences(),
     reservationAssist: normalizeReservationAssist(null),
     plannerHubBooking: normalizePlannerHubBooking(null),
@@ -1693,10 +1701,89 @@ export function shouldEvaluateFrequency(lastEvaluatedAt: string, frequency: Freq
   return now - new Date(lastEvaluatedAt).getTime() >= frequencyToMs(frequency);
 }
 
+type EvaluationUrgency = "cold" | "warm" | "hot" | "manual";
+
+function isoTimestampMs(value: string) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function extendEvaluationHotWindow(preferences: StoredPreferences, at = Date.now()) {
+  const nextExpiry = new Date(at + HOT_EVALUATION_WINDOW_MS).toISOString();
+  preferences.evaluationHotUntil =
+    preferences.evaluationHotUntil && preferences.evaluationHotUntil > nextExpiry
+      ? preferences.evaluationHotUntil
+      : nextExpiry;
+  preferences.lastMeaningfulChangeAt = new Date(at).toISOString();
+}
+
+function hasAnyActivePlannerHubJob(state: BackendState, userId: string, plannerHubId: string) {
+  return state.plannerHubJobs.some(
+    (job) =>
+      job.userId === userId &&
+      job.plannerHubId === plannerHubId &&
+      (job.status === "queued" || job.status === "processing")
+  );
+}
+
+function isWatchDateInsideHotWindow(date: string, now = Date.now()) {
+  if (!date) return false;
+  const today = new Date(now).toISOString().slice(0, 10);
+  const lookahead = new Date(now + HOT_WATCH_LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return date >= today && date <= lookahead;
+}
+
+function resolveEvaluationUrgency(
+  state: BackendState,
+  preferences: StoredPreferences,
+  items: StoredWatchItem[],
+  userId: string,
+  now = Date.now()
+): EvaluationUrgency {
+  if (items.length === 0) {
+    return "cold";
+  }
+
+  const plannerHubId = preferences.plannerHubConnection.plannerHubId || "primary";
+  const hotUntilMs = isoTimestampMs(preferences.evaluationHotUntil);
+  const hasArmedWatch = items.some((item) => item.bookingMode === "watch_and_attempt");
+  const hasNearTermWatch = items.some((item) => isWatchDateInsideHotWindow(item.date, now));
+  const hasReservableWatch = items.some((item) => isWatchStatusReservable(item.currentStatus));
+  const hasActiveJob = hasAnyActivePlannerHubJob(state, userId, plannerHubId);
+
+  if (hotUntilMs > now || hasArmedWatch || hasNearTermWatch || hasReservableWatch || hasActiveJob) {
+    return "hot";
+  }
+
+  return preferences.syncFrequency === "manual" ? "manual" : "warm";
+}
+
+function shouldEvaluateAccount(
+  state: BackendState,
+  preferences: StoredPreferences,
+  items: StoredWatchItem[],
+  userId: string,
+  now = Date.now()
+) {
+  const urgency = resolveEvaluationUrgency(state, preferences, items, userId, now);
+
+  if (urgency === "cold" || urgency === "manual") {
+    return { shouldEvaluate: false, urgency };
+  }
+
+  const cadence = urgency === "hot" ? "1m" : preferences.syncFrequency;
+  return {
+    shouldEvaluate: shouldEvaluateFrequency(preferences.lastEvaluatedAt, cadence, now),
+    urgency,
+  };
+}
+
 export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
   const state = await readBackendState();
   const lookup = buildFeedLookup(rows);
-  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
   const checkedAt =
     state.syncMeta.lastAttemptedSyncAt || state.syncMeta.lastSuccessfulSyncAt || nowIso;
   const changesByUser = new Map<string, AlertChange[]>();
@@ -1704,12 +1791,13 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
 
   for (const user of state.users) {
     const preferences = getPreferencesFromState(state, user.id);
+    const items = getWatchItemsForUser(state, user.id);
+    const evaluationState = shouldEvaluateAccount(state, preferences, items, user.id, nowMs);
 
-    if (!shouldEvaluateFrequency(preferences.lastEvaluatedAt, preferences.syncFrequency)) {
+    if (!evaluationState.shouldEvaluate) {
       continue;
     }
 
-    const items = getWatchItemsForUser(state, user.id);
     const userChanges: AlertChange[] = [];
     evaluatedUserIds.push(user.id);
     const importedMembers = preferences.importedDisneyMembers;
@@ -1748,6 +1836,7 @@ export async function evaluateWatchItemsAgainstFeed(rows: FeedRow[]) {
     preferences.lastEvaluatedAt = nowIso;
 
     if (userChanges.length > 0) {
+      extendEvaluationHotWindow(preferences, nowMs);
       changesByUser.set(user.id, userChanges);
     }
   }
@@ -2306,6 +2395,7 @@ function queuePlannerHubBookingJobInState(
   };
 
   state.plannerHubJobs.push(job);
+  extendEvaluationHotWindow(preferences, Date.parse(now));
   preferences.plannerHubBooking = normalizePlannerHubBooking({
     ...preferences.plannerHubBooking,
     plannerHubId,

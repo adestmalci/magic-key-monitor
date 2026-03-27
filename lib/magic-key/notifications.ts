@@ -10,6 +10,20 @@ import {
 } from "./backend";
 import type { AlertChange } from "./backend";
 
+export type AlertDeliverySummary = {
+  userId: string;
+  email: {
+    attempted: boolean;
+    ok: boolean;
+    message: string;
+  };
+  push: {
+    attempted: boolean;
+    ok: boolean;
+    message: string;
+  };
+};
+
 function createEmailHtml(email: string, changes: AlertChange[]) {
   const cards = changes
     .map(({ item, previousStatus, currentStatus }) => {
@@ -259,25 +273,71 @@ export async function sendAlertsForChanges(
   state: Awaited<ReturnType<typeof import("./backend").readBackendState>>,
   changesByUser: Map<string, AlertChange[]>
 ) {
+  const summaries: AlertDeliverySummary[] = [];
+
   for (const [userId, changes] of changesByUser.entries()) {
     const user = getUserFromState(state, userId);
     if (!user || changes.length === 0) continue;
 
     const preferences = getPreferencesFromState(state, userId);
     const emailTarget = preferences.emailAddress || user.email;
+    let emailSummary: AlertDeliverySummary["email"] = {
+      attempted: false,
+      ok: false,
+      message: "Email delivery was not requested for this account.",
+    };
+    let pushSummary: AlertDeliverySummary["push"] = {
+      attempted: false,
+      ok: false,
+      message: "Push delivery was not requested for this account.",
+    };
 
     if (preferences.emailEnabled && emailTarget) {
-      await sendEmail(
-        emailTarget,
-        `${changes.length} Magic Key update${changes.length === 1 ? "" : "s"}`,
-        createEmailHtml(emailTarget, changes)
-      );
+      try {
+        const result = await sendEmail(
+          emailTarget,
+          `${changes.length} Magic Key update${changes.length === 1 ? "" : "s"}`,
+          createEmailHtml(emailTarget, changes)
+        );
+        emailSummary = {
+          attempted: true,
+          ok: result.ok,
+          message: result.message,
+        };
+      } catch (error) {
+        emailSummary = {
+          attempted: true,
+          ok: false,
+          message: error instanceof Error ? error.message : "Email delivery failed.",
+        };
+      }
     }
 
     if (preferences.pushEnabled) {
-      await sendPushToUser(state, userId, createPushPayload(changes));
+      try {
+        const result = await sendPushToUser(state, userId, createPushPayload(changes));
+        pushSummary = {
+          attempted: true,
+          ok: result.ok,
+          message: result.message,
+        };
+      } catch (error) {
+        pushSummary = {
+          attempted: true,
+          ok: false,
+          message: error instanceof Error ? error.message : "Push delivery failed.",
+        };
+      }
     }
+
+    summaries.push({
+      userId,
+      email: emailSummary,
+      push: pushSummary,
+    });
   }
+
+  return summaries;
 }
 
 export async function sendPlannerHubBookingStatusEmailForUser(
