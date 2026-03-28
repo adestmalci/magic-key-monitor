@@ -1,12 +1,13 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { FREQUENCIES, PARK_OPTIONS, PASS_TYPES, STATUS_META } from "../../lib/magic-key/config";
 import type { FrequencyType, ParkOption, ParkTieBreaker, PassType, StatusType } from "../../lib/magic-key/types";
-import { classNames, formatMonthLabel, formatWatchDate, type CalendarCell } from "../../lib/magic-key/utils";
+import { classNames, formatMonthLabel, formatWatchDate, isPastWatchDate, type CalendarCell } from "../../lib/magic-key/utils";
 import { StatusIcon } from "./icons";
 
 type PickerCell = (CalendarCell & {
   status: StatusType;
   disabled: boolean;
+  expired: boolean;
   selected: boolean;
 }) | null;
 
@@ -50,10 +51,14 @@ export function AddWatchForm({
   onAddWatchItem: () => void;
 }) {
   const legend: StatusType[] = ["blocked", "unavailable", "dl", "dca", "either"];
-  const selectionDisabled = selectedDateStatus === "blocked";
+  const selectionDisabled = selectedDateStatus === "blocked" || isPastWatchDate(dateInput);
 
   function cellClasses(cell: Exclude<PickerCell, null>) {
     const base = "min-h-[58px] rounded-[20px] border px-2 py-2 text-left transition sm:min-h-[68px] sm:rounded-[22px] sm:px-2.5 sm:py-2.5";
+
+    if (cell.expired) {
+      return classNames(base, "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400");
+    }
 
     if (cell.disabled) {
       return classNames(base, "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400");
@@ -180,13 +185,17 @@ export function AddWatchForm({
                           cell.selected ? "text-white/90" : cell.disabled ? "text-slate-400" : "text-current"
                         )}
                       >
-                        <StatusIcon
-                          status={cell.status}
-                          size="h-3.5 w-3.5 sm:h-4 sm:w-4"
-                          className={classNames(
-                            cell.selected ? "text-white" : cell.disabled ? "text-slate-400" : undefined
-                          )}
-                        />
+                        {cell.expired ? (
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">Past</span>
+                        ) : (
+                          <StatusIcon
+                            status={cell.status}
+                            size="h-3.5 w-3.5 sm:h-4 sm:w-4"
+                            className={classNames(
+                              cell.selected ? "text-white" : cell.disabled ? "text-slate-400" : undefined
+                            )}
+                          />
+                        )}
                       </div>
                     </button>
                   );
@@ -230,7 +239,11 @@ export function AddWatchForm({
               <>
                 <span className="font-semibold">{formatWatchDate(dateInput)}</span>
                 {" • "}
-                {selectedDateStatus ? STATUS_META[selectedDateStatus].label : "Waiting for sync"}
+                {isPastWatchDate(dateInput)
+                  ? "Past date"
+                  : selectedDateStatus
+                    ? STATUS_META[selectedDateStatus].label
+                    : "Waiting for sync"}
               </>
             ) : (
               "Choose a date from the calendar to add it to your wishboard."

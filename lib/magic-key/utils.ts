@@ -1,5 +1,7 @@
 import type { FeedRow, ImportedDisneyMember, ParkTieBreaker, SchedulerHealth, StatusType, SyncMeta, WatchItem } from "./types";
 
+export const WATCH_DATE_TIME_ZONE = "America/Los_Angeles";
+
 export type CalendarCell = {
   date: string;
   day: number;
@@ -53,6 +55,22 @@ export function formatActivityTime(iso: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(iso));
+}
+
+export function currentWatchDateKey(now = Date.now(), timeZone = WATCH_DATE_TIME_ZONE) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return formatter.format(new Date(now));
+}
+
+export function isPastWatchDate(dateStr: string, now = Date.now(), timeZone = WATCH_DATE_TIME_ZONE) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return false;
+  return dateStr < currentWatchDateKey(now, timeZone);
 }
 
 export function comparePriority(status: StatusType) {

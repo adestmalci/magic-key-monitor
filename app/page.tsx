@@ -43,6 +43,7 @@ import {
   classNames,
   currentMonthKey,
   formatWatchDate,
+  isPastWatchDate,
   monthKeyFromDate,
   normalizeParkTieBreaker,
   needsIosHomeScreenNotifications,
@@ -79,6 +80,10 @@ function pruneActivityItems(items: ActivityItem[], now = Date.now()) {
       return now - createdAt <= ACTIVITY_RETENTION_MS;
     })
     .slice(0, 40);
+}
+
+function prunePastWatchItems(items: WatchItem[], now = Date.now()) {
+  return items.filter((item) => !isPastWatchDate(item.date, now));
 }
 
 function ensureBrowserDeviceId() {
@@ -248,7 +253,7 @@ export default function Home() {
       setEmailAddress(data.preferences.emailAddress || data.user.email);
       setSyncFrequency(normalizeSupportedFrequency(data.preferences.syncFrequency));
       setAuthEmail(data.user.email);
-      setWatchItems(data.watchItems);
+      setWatchItems(prunePastWatchItems(data.watchItems));
       setActivity(pruneActivityItems(data.activity || []));
       setAccountSaveState("saved");
       setAccountSaveMessage(`Account settings are synced for ${data.user.email}.`);
@@ -381,8 +386,9 @@ export default function Home() {
           }))
         : [];
 
-      setWatchItems(nextWatchItems);
-      watchItemsRef.current = nextWatchItems;
+      const prunedWatchItems = prunePastWatchItems(nextWatchItems);
+      setWatchItems(prunedWatchItems);
+      watchItemsRef.current = prunedWatchItems;
     } catch {
       setDisplayedMonth(currentMonthKey());
     }
@@ -588,7 +594,7 @@ export default function Home() {
 
         if (!isServerBackedSession) {
           setWatchItems((current) =>
-            current.map((item) => {
+            prunePastWatchItems(current).map((item) => {
               const nextStatus = resolveWatchItemStatus(item, lookup, importedDisneyMembers);
               const changed = nextStatus !== item.currentStatus;
 
@@ -783,12 +789,14 @@ export default function Home() {
         if (!cell) return null;
 
         const status = pickerStatusByDate.get(cell.date) ?? "unavailable";
+        const expired = isPastWatchDate(cell.date);
 
         return {
           ...cell,
           status,
-          disabled: status === "blocked",
-          selected: cell.date === dateInput,
+          disabled: expired || status === "blocked",
+          expired,
+          selected: !expired && cell.date === dateInput,
         };
       })
     );
@@ -813,6 +821,11 @@ export default function Home() {
   }) => {
     if (!date) {
       pushToast("error", "Choose a date first.");
+      return;
+    }
+
+    if (isPastWatchDate(date)) {
+      pushToast("error", "Past dates can't be watched. Choose today or a future date.");
       return;
     }
 

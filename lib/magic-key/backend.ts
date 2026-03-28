@@ -10,7 +10,7 @@ import {
 } from "node:crypto";
 import { normalizeSupportedFrequency } from "./config";
 import { getDataPath, readStoredValue, writeStoredValue } from "./storage";
-import { buildFeedLookup, normalizeParkTieBreaker, resolveAutoBookingPark, resolveWatchItemStatus } from "./utils";
+import { buildFeedLookup, isPastWatchDate, normalizeParkTieBreaker, resolveAutoBookingPark, resolveWatchItemStatus } from "./utils";
 import type {
   ActivityItem,
   BookingMode,
@@ -729,6 +729,10 @@ function prunePlannerHubJobs(records: PlannerHubJobRecord[], now = Date.now()) {
   });
 }
 
+function pruneWatchItems(records: StoredWatchItem[], now = Date.now()) {
+  return records.filter((record) => !isPastWatchDate(record.date, now));
+}
+
 function refreshLocalWorkerDevices(records: LocalWorkerDeviceRecord[], now = Date.now()) {
   return records.map((record) => {
     const seenAt = Date.parse(record.lastSeenAt || record.lastCheckInAt);
@@ -744,6 +748,7 @@ function refreshLocalWorkerDevices(records: LocalWorkerDeviceRecord[], now = Dat
 function pruneBackendState(state: BackendState): BackendState {
   return {
     ...state,
+    watchItems: pruneWatchItems(state.watchItems),
     activity: pruneActivityItems(state.activity),
     magicLinks: pruneMagicLinks(state.magicLinks),
     plannerHubJobs: prunePlannerHubJobs(state.plannerHubJobs),
@@ -879,7 +884,7 @@ export async function readBackendState(): Promise<BackendState> {
     createDefault: defaultState,
   })) as Partial<BackendState>;
 
-  return {
+  const nextState = {
     ...defaultState(),
     ...parsed,
     syncMeta: {
@@ -888,7 +893,7 @@ export async function readBackendState(): Promise<BackendState> {
     },
     users: Array.isArray(parsed.users) ? parsed.users : [],
     preferences: Array.isArray(parsed.preferences) ? parsed.preferences : [],
-    watchItems: Array.isArray(parsed.watchItems) ? parsed.watchItems : [],
+    watchItems: pruneWatchItems(Array.isArray(parsed.watchItems) ? parsed.watchItems : []),
     activity: pruneActivityItems(Array.isArray(parsed.activity) ? parsed.activity : []),
     magicLinks: pruneMagicLinks(Array.isArray(parsed.magicLinks) ? parsed.magicLinks : []),
     pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
@@ -900,6 +905,19 @@ export async function readBackendState(): Promise<BackendState> {
       Array.isArray(parsed.localWorkerDevices) ? normalizeLocalWorkerDevices(parsed.localWorkerDevices) : []
     ),
   };
+
+  if (
+    Array.isArray(parsed.watchItems) &&
+    nextState.watchItems.length !== parsed.watchItems.length
+  ) {
+    await writeStoredValue({
+      storageKey: "backend-state",
+      localPath: STATE_PATH,
+      value: pruneBackendState(nextState),
+    });
+  }
+
+  return nextState;
 }
 
 export async function writeBackendState(state: BackendState) {
@@ -1471,6 +1489,13 @@ export async function createWatchItemForUser(
     };
   }
 
+  if (isPastWatchDate(payload.date)) {
+    return {
+      ok: false as const,
+      error: "Past dates can't be watched. Choose today or a future date.",
+    };
+  }
+
   if (payload.preferredPark === "either" && !normalizeParkTieBreaker(payload.eitherParkTieBreaker)) {
     return {
       ok: false as const,
@@ -1539,6 +1564,8 @@ export async function importWatchItemsForUser(userId: string, items: WatchItem[]
   const now = new Date().toISOString();
 
   for (const item of items) {
+    if (isPastWatchDate(item.date)) continue;
+
     const key = `${item.date}__${item.passType}__${item.preferredPark}`;
     if (existingKeys.has(key)) continue;
 
