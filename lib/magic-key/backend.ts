@@ -1439,16 +1439,10 @@ export async function upsertPreferencesForUser(
     },
     user?.email ?? preferences.reservationAssist?.plannerHubEmail ?? ""
   );
-  preferences.plannerHubBooking = normalizePlannerHubBooking({
-    ...preferences.plannerHubBooking,
-    ...(patch.plannerHubBooking ?? {}),
-  });
-  preferences.plannerHubConnection = normalizePlannerHubConnection(
-    {
-      ...currentConnection,
-      plannerHubId: patch.plannerHubConnection?.plannerHubId ?? currentConnection.plannerHubId,
-      disneyEmail: patch.plannerHubConnection?.disneyEmail ?? currentConnection.disneyEmail,
-    },
+  preferences.plannerHubBooking = mergeEditablePlannerHubBooking(preferences.plannerHubBooking, patch.plannerHubBooking);
+  preferences.plannerHubConnection = mergeEditablePlannerHubConnection(
+    currentConnection,
+    patch.plannerHubConnection,
     patch.plannerHubConnection?.disneyEmail ??
       patch.reservationAssist?.plannerHubEmail ??
       user?.email ??
@@ -1475,9 +1469,16 @@ export async function upsertPreferencesForUser(
   latestPreferences.pushEnabled = preferences.pushEnabled;
   latestPreferences.syncFrequency = preferences.syncFrequency;
   latestPreferences.reservationAssist = preferences.reservationAssist;
-  latestPreferences.plannerHubBooking = preferences.plannerHubBooking;
+  latestPreferences.plannerHubBooking = mergeEditablePlannerHubBooking(
+    latestPreferences.plannerHubBooking,
+    patch.plannerHubBooking
+  );
   latestPreferences.plannerHubConnection = applyActiveDeviceToConnection(
-    preferences.plannerHubConnection,
+    mergeEditablePlannerHubConnection(
+      latestPreferences.plannerHubConnection,
+      patch.plannerHubConnection,
+      preferences.plannerHubConnection.disneyEmail
+    ),
     getActiveLocalWorkerDevice(latestState, userId)
   );
   latestPreferences.importedDisneyMembers = preferences.importedDisneyMembers;
@@ -1533,6 +1534,40 @@ function queueImmediateReadyBookingInState(state: BackendState, userId: string) 
   } catch {
     return null;
   }
+}
+
+function mergeEditablePlannerHubBooking(
+  latest: PlannerHubBookingState,
+  patch: Partial<PlannerHubBookingState> | undefined
+) {
+  if (!patch) {
+    return latest;
+  }
+
+  return normalizePlannerHubBooking({
+    ...latest,
+    plannerHubId: patch.plannerHubId ?? latest.plannerHubId,
+    enabled: patch.enabled ?? latest.enabled,
+  });
+}
+
+function mergeEditablePlannerHubConnection(
+  latest: PlannerHubConnectionState,
+  patch: Partial<PlannerHubConnectionState> | undefined,
+  fallbackEmail: string
+) {
+  if (!patch) {
+    return normalizePlannerHubConnection(latest, fallbackEmail);
+  }
+
+  return normalizePlannerHubConnection(
+    {
+      ...latest,
+      plannerHubId: patch.plannerHubId ?? latest.plannerHubId,
+      disneyEmail: patch.disneyEmail ?? latest.disneyEmail,
+    },
+    patch.disneyEmail ?? latest.disneyEmail ?? fallbackEmail
+  );
 }
 
 export async function createWatchItemForUser(

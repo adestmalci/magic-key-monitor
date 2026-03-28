@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -309,6 +309,7 @@ export function ReservationAssistSection({
   const [pairDeviceName, setPairDeviceName] = useState("My Mac");
   const [pairToken, setPairToken] = useState("");
   const [isCreatingPairToken, setIsCreatingPairToken] = useState(false);
+  const autoRefreshAttemptRef = useRef("");
   const connectJobActive = latestConnectJob?.status === "queued" || latestConnectJob?.status === "processing";
   const importJobActive = latestImportJob?.status === "queued" || latestImportJob?.status === "processing";
   const bookingJobActive = latestBookingJob?.status === "queued" || latestBookingJob?.status === "processing";
@@ -795,6 +796,40 @@ export function ReservationAssistSection({
         : importState === "failed"
           ? plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "The last connected-party import failed."
           : plannerHubConnection.lastImportMessage || "No connected Disney party import has finished yet.";
+
+  useEffect(() => {
+    if (!currentTarget || !hasReserveTargetSelections) {
+      autoRefreshAttemptRef.current = "";
+      return;
+    }
+
+    if (
+      effectiveConnectionStatus !== "connected" ||
+      !plannerHubConnection.hasLocalSession ||
+      !importIsStale ||
+      importIsRefreshing ||
+      bookingJobActive
+    ) {
+      return;
+    }
+
+    const refreshKey = `${currentTarget.id}:${latestImportAt}`;
+    if (autoRefreshAttemptRef.current === refreshKey) {
+      return;
+    }
+    autoRefreshAttemptRef.current = refreshKey;
+    void onRefreshDisneyStatus();
+  }, [
+    bookingJobActive,
+    currentTarget,
+    effectiveConnectionStatus,
+    hasReserveTargetSelections,
+    importIsRefreshing,
+    importIsStale,
+    latestImportAt,
+    onRefreshDisneyStatus,
+    plannerHubConnection.hasLocalSession,
+  ]);
 
   const watchTargetStatus = useMemo(() => {
     if (!currentTarget) {
