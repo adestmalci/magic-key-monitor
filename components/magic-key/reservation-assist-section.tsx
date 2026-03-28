@@ -749,10 +749,7 @@ export function ReservationAssistSection({
     targetAutoBookingEnabled,
   ]);
 
-  const hasReserveTargetSelections = useMemo(
-    () => watchItems.some((item) => item.selectedImportedMemberIds.length > 0),
-    [watchItems]
-  );
+  const hasReserveTargets = watchItems.length > 0;
   const latestImportAt = getLatestPlannerHubImportAt(plannerHubConnection);
   const importFresh = isPlannerHubImportFresh(plannerHubConnection);
   const importIsStale =
@@ -789,8 +786,8 @@ export function ReservationAssistSection({
         } found.`
       : importIsStale
         ? `Last imported ${formatSyncTime(latestImportAt)}. This is the last known connected Disney party snapshot, and it is now stale.${
-            hasReserveTargetSelections
-              ? " Reserve refreshes this automatically once a day for selected targets and again right before auto-booking starts."
+            hasReserveTargets
+              ? " Reserve refreshes this automatically once a day for active watched dates and again right before auto-booking starts."
               : " Refresh it before relying on imported member targeting again."
           }`
         : importState === "failed"
@@ -798,7 +795,7 @@ export function ReservationAssistSection({
           : plannerHubConnection.lastImportMessage || "No connected Disney party import has finished yet.";
 
   useEffect(() => {
-    if (!currentTarget || !hasReserveTargetSelections) {
+    if (!currentTarget || !hasReserveTargets) {
       autoRefreshAttemptRef.current = "";
       return;
     }
@@ -823,7 +820,7 @@ export function ReservationAssistSection({
     bookingJobActive,
     currentTarget,
     effectiveConnectionStatus,
-    hasReserveTargetSelections,
+    hasReserveTargets,
     importIsRefreshing,
     importIsStale,
     latestImportAt,

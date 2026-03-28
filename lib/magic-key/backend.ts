@@ -2167,8 +2167,8 @@ function isWatchStatusReservable(status: WatchItem["currentStatus"]) {
   return status === "either" || status === "dl" || status === "dca";
 }
 
-function hasReserveTargetSelections(items: StoredWatchItem[]) {
-  return items.some((item) => item.selectedImportedMemberIds.length > 0);
+function hasReserveTargets(items: StoredWatchItem[]) {
+  return items.length > 0;
 }
 
 function isReservePartyMaintenanceDue(connection: PlannerHubConnectionState, now = Date.now()) {
@@ -2184,7 +2184,7 @@ function maybeQueueReserveMaintenanceImportInState(
   items: StoredWatchItem[],
   now = Date.now()
 ) {
-  if (!hasReserveTargetSelections(items)) {
+  if (!hasReserveTargets(items)) {
     return null;
   }
 
@@ -2205,7 +2205,7 @@ function maybeQueueReserveMaintenanceImportInState(
   }
 
   const job = queuePlannerHubImportJobInState(state, userId, {
-    reason: "Refreshing the connected Disney party for active Reserve targets.",
+    reason: "Refreshing the connected Disney party for active Reserve watched dates.",
     force: true,
   });
   extendEvaluationHotWindow(preferences, now);
