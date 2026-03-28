@@ -815,7 +815,21 @@ export function ReservationAssistSection({
       return;
     }
     autoRefreshAttemptRef.current = refreshKey;
-    void onRefreshDisneyStatus();
+    void (async () => {
+      const queued = await onImportConnectedMembers();
+      if (queued) {
+        onPlannerHubConnectionChange({
+          lastImportJobId: typeof queued === "string" ? queued : plannerHubConnection.lastImportJobId,
+          lastImportQueuedAt: new Date().toISOString(),
+          lastImportStatus: "queued",
+          lastImportMessage: "Refreshing the connected Disney party for this watched date.",
+          lastImportError: "",
+          status: "importing",
+        });
+      } else {
+        void onRefreshDisneyStatus();
+      }
+    })();
   }, [
     bookingJobActive,
     currentTarget,
@@ -824,7 +838,10 @@ export function ReservationAssistSection({
     importIsRefreshing,
     importIsStale,
     latestImportAt,
+    onImportConnectedMembers,
+    onPlannerHubConnectionChange,
     onRefreshDisneyStatus,
+    plannerHubConnection.lastImportJobId,
     plannerHubConnection.hasLocalSession,
   ]);
 
