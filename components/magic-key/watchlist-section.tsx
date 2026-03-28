@@ -8,7 +8,6 @@ import { StatusBadge } from "./status-badge";
 
 export function WatchlistSection({
   watchItems,
-  lastRunSummary,
   isSyncing,
   syncFrequency,
   lastSyncAt,
@@ -18,7 +17,6 @@ export function WatchlistSection({
   onRemoveWatchItem,
 }: {
   watchItems: WatchItem[];
-  lastRunSummary: string;
   isSyncing: boolean;
   syncFrequency: FrequencyType;
   lastSyncAt: string;
@@ -91,10 +89,6 @@ export function WatchlistSection({
         </div>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-900">
-        {lastRunSummary}
-      </div>
-
       <div className="mt-6">
         {watchItems.length === 0 ? (
           <EmptyState
@@ -164,7 +158,7 @@ export function WatchlistSection({
                         ) : null}
                         <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700">
                           <Clock3 className="h-4 w-4" />
-                          {syncFrequency === "manual" ? frequencyLabel : `Baseline: ${frequencyLabel}`}
+                          {frequencyLabel}
                         </span>
                       </div>
 

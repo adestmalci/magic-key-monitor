@@ -853,12 +853,12 @@ export default function Home() {
   }) => {
     if (!date) {
       pushToast("error", "Choose a date first.");
-      return;
+      return false;
     }
 
     if (isPastWatchDate(date)) {
       pushToast("error", "Past dates can't be watched. Choose today or a future date.");
-      return;
+      return false;
     }
 
     if (nextFrequency !== syncFrequency) {
@@ -869,14 +869,14 @@ export default function Home() {
 
     if (preferredPark === "either" && !normalizedTieBreaker) {
       pushToast("error", "Choose which park should be preferred when both parks are open.");
-      return;
+      return false;
     }
 
     const duplicate = watchItems.some((item) => item.date === date && item.passType === passType && item.preferredPark === preferredPark);
 
     if (duplicate) {
       pushToast("error", "That watched date already exists.");
-      return;
+      return false;
     }
 
     const nextStatus = resolveWatchItemStatus(
@@ -893,7 +893,7 @@ export default function Home() {
 
     if (nextStatus === "blocked") {
       pushToast("error", "That date is blocked out for the selected key.");
-      return;
+      return false;
     }
 
     let nextItem: WatchItem = {
@@ -920,7 +920,7 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok) {
         pushToast("error", data.error || "We couldn't save that watched date yet.");
-        return;
+        return false;
       }
 
       nextItem = data.item;
@@ -957,6 +957,7 @@ export default function Home() {
     });
 
     pushToast("success", sessionUser ? "Watched date saved to your account." : "Watched date added.");
+    return true;
   }, [feedLookup, importedDisneyMembers, lastSyncAt, persistActivityEntry, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
 
   const addWatchItem = useCallback(async () => {
@@ -1470,7 +1471,6 @@ export default function Home() {
         {activeTab === "watchlist" && (
           <WatchlistSection
             watchItems={watchItems}
-            lastRunSummary={lastRunSummary}
             isSyncing={isSyncing}
             syncFrequency={syncFrequency}
             lastSyncAt={lastSyncAt}
@@ -1491,7 +1491,7 @@ export default function Home() {
             defaultPreferredPark={preferredPark}
             defaultEitherParkTieBreaker={eitherParkTieBreaker}
             defaultSyncFrequency={syncFrequency}
-            onQuickWatch={(payload) => void addWatchItemFromSelection(payload)}
+            onQuickWatch={(payload) => addWatchItemFromSelection(payload)}
             onPreviousMonth={() => setDisplayedMonth(previousMonthKey(displayedMonth))}
             onNextMonth={() => setDisplayedMonth(nextMonthKey(displayedMonth))}
           />

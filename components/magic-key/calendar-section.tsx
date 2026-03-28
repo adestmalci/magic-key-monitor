@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Clock3, Plus, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FREQUENCIES, PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
 import type { FrequencyType, ParkOption, ParkTieBreaker, PassType, StatusType, WatchItem } from "../../lib/magic-key/types";
 import { classNames, formatMonthLabel, type CalendarCell } from "../../lib/magic-key/utils";
@@ -170,7 +170,7 @@ export function CalendarSection({
     preferredPark: ParkOption;
     eitherParkTieBreaker: ParkTieBreaker;
     syncFrequency: FrequencyType;
-  }) => void;
+  }) => Promise<boolean>;
   onPreviousMonth: () => void;
   onNextMonth: () => void;
 }) {
@@ -179,6 +179,8 @@ export function CalendarSection({
   const [quickPreferredPark, setQuickPreferredPark] = useState<ParkOption>(defaultPreferredPark);
   const [quickEitherParkTieBreaker, setQuickEitherParkTieBreaker] = useState<ParkTieBreaker>(defaultEitherParkTieBreaker);
   const [quickSyncFrequency, setQuickSyncFrequency] = useState<FrequencyType>(defaultSyncFrequency);
+  const desktopPopoverRef = useRef<HTMLDivElement | null>(null);
+  const mobileSheetRef = useRef<HTMLDivElement | null>(null);
 
   function openQuickWatch(date: string) {
     const state = calendarCellStates.get(date);
@@ -195,6 +197,36 @@ export function CalendarSection({
     setQuickEitherParkTieBreaker(defaultEitherParkTieBreaker);
     setQuickSyncFrequency(defaultSyncFrequency);
   }
+
+  useEffect(() => {
+    setExpandedDate(null);
+  }, [displayedMonth]);
+
+  useEffect(() => {
+    if (!expandedDate) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-quickwatch-trigger='true']")) return;
+      if (desktopPopoverRef.current?.contains(target)) return;
+      if (mobileSheetRef.current?.contains(target)) return;
+      setExpandedDate(null);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setExpandedDate(null);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [expandedDate]);
 
   const expandedDateLabel = expandedDate
     ? new Intl.DateTimeFormat("en-US", {
@@ -307,6 +339,7 @@ export function CalendarSection({
                         <button
                           type="button"
                           onClick={() => openQuickWatch(cell.date)}
+                          data-quickwatch-trigger="true"
                           className="mx-auto inline-flex h-8 w-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-900 transition hover:bg-violet-100 sm:h-10 sm:w-10"
                           aria-label={`Add watch for ${cell.date}`}
                         >
@@ -316,6 +349,7 @@ export function CalendarSection({
 
                       {isExpanded && !expired ? (
                         <div
+                          ref={desktopPopoverRef}
                           className={classNames(
                             "absolute top-[78px] z-30 hidden w-[260px] rounded-[24px] border border-violet-200 bg-white p-3 shadow-xl shadow-violet-100 md:block",
                             cellIndex >= 4 ? "right-0" : "left-0"
@@ -337,15 +371,17 @@ export function CalendarSection({
                           <div className="mt-3 flex gap-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                setExpandedDate(null);
-                                onQuickWatch({
+                              onClick={async () => {
+                                const saved = await onQuickWatch({
                                   date: cell.date,
                                   passType: quickPassType,
                                   preferredPark: quickPreferredPark,
                                   eitherParkTieBreaker: quickPreferredPark === "either" ? quickEitherParkTieBreaker : "",
                                   syncFrequency: quickSyncFrequency,
                                 });
+                                if (saved) {
+                                  setExpandedDate(null);
+                                }
                               }}
                               className="inline-flex h-9 flex-1 items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 text-sm font-semibold text-white shadow-md shadow-violet-200"
                             >
@@ -404,8 +440,15 @@ export function CalendarSection({
       </div>
 
       {expandedDate ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-zinc-950/20 px-4 pb-4 pt-20 md:hidden">
-          <div className="w-full max-w-md rounded-[28px] border border-violet-200 bg-white p-4 shadow-2xl shadow-violet-200/40">
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-zinc-950/20 px-4 pb-4 pt-20 md:hidden"
+          onClick={() => setExpandedDate(null)}
+        >
+          <div
+            ref={mobileSheetRef}
+            className="w-full max-w-md rounded-[28px] border border-violet-200 bg-white p-4 shadow-2xl shadow-violet-200/40"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
@@ -445,16 +488,18 @@ export function CalendarSection({
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (!expandedDate) return;
-                  setExpandedDate(null);
-                  onQuickWatch({
+                  const saved = await onQuickWatch({
                     date: expandedDate,
                     passType: quickPassType,
                     preferredPark: quickPreferredPark,
                     eitherParkTieBreaker: quickPreferredPark === "either" ? quickEitherParkTieBreaker : "",
                     syncFrequency: quickSyncFrequency,
                   });
+                  if (saved) {
+                    setExpandedDate(null);
+                  }
                 }}
                 className="inline-flex h-11 items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 text-sm font-semibold text-white shadow-md shadow-violet-200"
               >
