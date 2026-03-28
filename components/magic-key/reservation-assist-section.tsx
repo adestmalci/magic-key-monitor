@@ -592,12 +592,13 @@ export function ReservationAssistSection({
       `${plannerHubBooking.lastBookingError} ${plannerHubBooking.lastBookingMessage} ${plannerHubBooking.lastResultMessage}`
     );
   const showBookingAttemptCard =
-    bookingJobActive ||
-    plannerHubBooking.status === "booked" ||
-    plannerHubBooking.status === "failed" ||
-    plannerHubBooking.status === "paused_login" ||
-    plannerHubBooking.status === "paused_mismatch" ||
-    bookingState === "processing";
+    watchItems.length > 0 &&
+    (bookingJobActive ||
+      plannerHubBooking.status === "booked" ||
+      plannerHubBooking.status === "failed" ||
+      plannerHubBooking.status === "paused_login" ||
+      plannerHubBooking.status === "paused_mismatch" ||
+      bookingState === "processing");
   const bookingStatusLabel =
     plannerHubBooking.status === "booked"
       ? "Booked"

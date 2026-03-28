@@ -988,7 +988,19 @@ export default function Home() {
         setAccountSaveMessage(`Wishboard changes are saved to ${sessionUser.email}.`);
       }
 
-      setWatchItems((current) => current.filter((row) => row.id !== id));
+      const nextItems = watchItems.filter((row) => row.id !== id);
+      setWatchItems(nextItems);
+      if (nextItems.length === 0) {
+        setPlannerHubBooking((current) => ({
+          ...createDefaultPlannerHubBooking(),
+          plannerHubId: current.plannerHubId,
+          enabled: current.enabled,
+          lastRequiredActionMessage: current.enabled
+            ? "Add a watched date first before booking can run."
+            : "Enable booking mode when you are ready to arm connected member targets.",
+        }));
+        setLatestBookingJob(null);
+      }
 
       if (item) {
         prependActivity(

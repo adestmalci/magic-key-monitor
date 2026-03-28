@@ -733,6 +733,57 @@ function pruneWatchItems(records: StoredWatchItem[], now = Date.now()) {
   return records.filter((record) => !isPastWatchDate(record.date, now));
 }
 
+function clearPlannerHubBookingAttempt(preferences: StoredPreferences, nextStep: string) {
+  preferences.plannerHubBooking = normalizePlannerHubBooking({
+    ...createDefaultPlannerHubBooking(),
+    plannerHubId: preferences.plannerHubBooking.plannerHubId || "primary",
+    enabled: preferences.plannerHubBooking.enabled,
+    status: "idle",
+    lastRequiredActionMessage: nextStep,
+  });
+}
+
+function reconcilePlannerHubBookingTargets(state: BackendState, preferences: StoredPreferences) {
+  const userWatchItems = state.watchItems.filter((item) => item.userId === preferences.userId);
+  const watchIds = new Set(userWatchItems.map((item) => item.id));
+  const booking = preferences.plannerHubBooking;
+  const bookingJob = booking.lastBookingJobId ? findPlannerHubJob(state, booking.lastBookingJobId) : null;
+  const hasWatchItems = userWatchItems.length > 0;
+  const bookingTargetMissing = Boolean(booking.lastBookedWatchItemId) && !watchIds.has(booking.lastBookedWatchItemId);
+  const activeJobTargetMissing = Boolean(bookingJob?.targetWatchItemId) && !watchIds.has(String(bookingJob?.targetWatchItemId));
+
+  if (!hasWatchItems || bookingTargetMissing || activeJobTargetMissing) {
+    if (bookingJob && (bookingJob.status === "queued" || bookingJob.status === "processing")) {
+      const now = new Date().toISOString();
+      bookingJob.status = "failed";
+      bookingJob.phase = "failed";
+      bookingJob.finishedAt = now;
+      bookingJob.updatedAt = now;
+      bookingJob.lastError = "The watched date was removed before the booking attempt could finish.";
+      bookingJob.lastMessage = bookingJob.lastError;
+      bookingJob.events = [
+        ...normalizeDisneyWorkerEvents(bookingJob.events),
+        {
+          phase: "failed",
+          at: now,
+          message: bookingJob.lastError,
+        },
+      ];
+    }
+
+    clearPlannerHubBookingAttempt(
+      preferences,
+      hasWatchItems
+        ? "Choose a watched date first before another booking attempt can run."
+        : "Add a watched date first before booking can run."
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
 function refreshLocalWorkerDevices(records: LocalWorkerDeviceRecord[], now = Date.now()) {
   return records.map((record) => {
     const seenAt = Date.parse(record.lastSeenAt || record.lastCheckInAt);
@@ -906,10 +957,23 @@ export async function readBackendState(): Promise<BackendState> {
     ),
   };
 
+  let bookingTargetsReconciled = false;
+  for (const preferences of nextState.preferences) {
+    if (reconcilePlannerHubBookingTargets(nextState, preferences)) {
+      bookingTargetsReconciled = true;
+    }
+  }
+
   if (
     Array.isArray(parsed.watchItems) &&
     nextState.watchItems.length !== parsed.watchItems.length
   ) {
+    await writeStoredValue({
+      storageKey: "backend-state",
+      localPath: STATE_PATH,
+      value: pruneBackendState(nextState),
+    });
+  } else if (bookingTargetsReconciled) {
     await writeStoredValue({
       storageKey: "backend-state",
       localPath: STATE_PATH,
@@ -1546,6 +1610,8 @@ export async function deleteWatchItemForUser(userId: string, id: string) {
   const nextItems = state.watchItems.filter((item) => !(item.userId === userId && item.id === id));
   const removed = nextItems.length !== state.watchItems.length;
   state.watchItems = nextItems;
+  const preferences = getPreferencesFromState(state, userId);
+  reconcilePlannerHubBookingTargets(state, preferences);
   await writeBackendState(state);
   return removed;
 }
