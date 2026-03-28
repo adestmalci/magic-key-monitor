@@ -51,6 +51,7 @@ import {
   normalizeStatus,
   previousMonthKey,
   resolveWatchItemStatus,
+  resolveStatus,
   syncMetaFromHeaders,
   urlBase64ToUint8Array,
 } from "../lib/magic-key/utils";
@@ -802,9 +803,40 @@ export default function Home() {
     );
   }, [pickerMonth, pickerStatusByDate, dateInput]);
 
+  const feedLookup = useMemo(() => buildFeedLookup(feedRows), [feedRows]);
+
   const calendarRows = useMemo(() => {
     return buildMonthCalendarRows(displayedMonth);
   }, [displayedMonth]);
+
+  const calendarCellStates = useMemo(() => {
+    const next = new Map<string, { expired: boolean; passStatuses: Record<PassType, StatusType> }>();
+
+    for (const row of calendarRows) {
+      for (const cell of row) {
+        if (!cell) continue;
+
+        next.set(cell.date, {
+          expired: isPastWatchDate(cell.date),
+          passStatuses: Object.fromEntries(
+            PASS_TYPES.map((pass) => [
+              pass.id,
+              resolveStatus(
+                {
+                  date: cell.date,
+                  passType: pass.id,
+                  preferredPark: "either",
+                },
+                feedLookup
+              ),
+            ])
+          ) as Record<PassType, StatusType>,
+        });
+      }
+    }
+
+    return next;
+  }, [calendarRows, feedLookup]);
 
   const addWatchItemFromSelection = useCallback(async ({
     date,
@@ -847,7 +879,6 @@ export default function Home() {
       return;
     }
 
-    const lookup = buildFeedLookup(feedRows);
     const nextStatus = resolveWatchItemStatus(
       {
         date,
@@ -856,7 +887,7 @@ export default function Home() {
         eitherParkTieBreaker: normalizedTieBreaker,
         selectedImportedMemberIds: [],
       },
-      lookup,
+      feedLookup,
       importedDisneyMembers
     );
 
@@ -926,7 +957,7 @@ export default function Home() {
     });
 
     pushToast("success", sessionUser ? "Watched date saved to your account." : "Watched date added.");
-  }, [feedRows, importedDisneyMembers, lastSyncAt, persistActivityEntry, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
+  }, [feedLookup, importedDisneyMembers, lastSyncAt, persistActivityEntry, prependActivity, pushToast, sessionUser, syncFrequency, watchItems]);
 
   const addWatchItem = useCallback(async () => {
     await addWatchItemFromSelection({
@@ -1454,6 +1485,7 @@ export default function Home() {
           <CalendarSection
             displayedMonth={displayedMonth}
             calendarRows={calendarRows}
+            calendarCellStates={calendarCellStates}
             watchedByDate={watchedByDate}
             defaultPassType={passType}
             defaultPreferredPark={preferredPark}

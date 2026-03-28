@@ -110,10 +110,10 @@ export const STATUS_META: Record<
 
 export const FREQUENCIES: Array<{ value: FrequencyType; label: string }> = [
   { value: "manual", label: "Manual only" },
-  { value: "5m", label: "Every 5 minutes when calm" },
-  { value: "10m", label: "Every 10 minutes when calm" },
-  { value: "15m", label: "Every 15 minutes when calm" },
-  { value: "30m", label: "Every 30 minutes when calm" },
+  { value: "5m", label: "Every 5 minutes" },
+  { value: "10m", label: "Every 10 minutes" },
+  { value: "15m", label: "Every 15 minutes" },
+  { value: "30m", label: "Every 30 minutes" },
 ];
 
 export const POLL_MS: Record<FrequencyType, number> = {

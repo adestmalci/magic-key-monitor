@@ -186,7 +186,7 @@ export function AddWatchForm({
                         )}
                       >
                         {cell.expired ? (
-                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">Past</span>
+                          <StatusIcon status="blocked" size="h-3.5 w-3.5 sm:h-4 sm:w-4" className="text-slate-400" />
                         ) : (
                           <StatusIcon
                             status={cell.status}
@@ -310,8 +310,7 @@ export function AddWatchForm({
               ))}
             </select>
             <span className="text-xs leading-5 text-zinc-500">
-              Calm watched dates use this baseline. Armed, near-term, or freshly changed dates temporarily speed up
-              automatically on the backend.
+              Armed, near-term, or freshly changed dates can temporarily speed up automatically on the backend.
             </span>
           </label>
 

@@ -1,15 +1,17 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Clock3, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock3, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { FREQUENCIES, PARK_OPTIONS, PASS_TYPES } from "../../lib/magic-key/config";
-import type { FrequencyType, ParkOption, ParkTieBreaker, PassType, WatchItem } from "../../lib/magic-key/types";
+import type { FrequencyType, ParkOption, ParkTieBreaker, PassType, StatusType, WatchItem } from "../../lib/magic-key/types";
 import { classNames, formatMonthLabel, type CalendarCell } from "../../lib/magic-key/utils";
 import { PassIcon, ParkIcon, StatusIcon } from "./icons";
 
 function QuickWatchFields({
   compact = false,
+  dateExpired = false,
   quickPassType,
+  passStatuses,
   quickPreferredPark,
   quickEitherParkTieBreaker,
   quickSyncFrequency,
@@ -19,7 +21,9 @@ function QuickWatchFields({
   onSyncFrequencyChange,
 }: {
   compact?: boolean;
+  dateExpired?: boolean;
   quickPassType: PassType;
+  passStatuses: Record<PassType, StatusType>;
   quickPreferredPark: ParkOption;
   quickEitherParkTieBreaker: ParkTieBreaker;
   quickSyncFrequency: FrequencyType;
@@ -34,24 +38,41 @@ function QuickWatchFields({
         Choose your key
       </div>
       <div className={classNames("mt-2 grid gap-1.5", compact ? "grid-cols-3" : "grid-cols-5")}>
-        {PASS_TYPES.map((pass) => (
-          <button
-            key={pass.id}
-            type="button"
-            onClick={() => onPassTypeChange(pass.id)}
-            className={classNames(
-              "rounded-2xl border px-1.5 py-2 text-center transition",
-              quickPassType === pass.id
-                ? "border-violet-400 bg-white shadow-sm"
-                : "border-white/80 bg-white/70 hover:border-violet-200"
-            )}
-          >
-            <div className="mx-auto flex h-7 w-7 items-center justify-center">
-              <PassIcon passType={pass.id} size="h-6 w-6" />
-            </div>
-            <div className="mt-1 text-[10px] font-medium text-zinc-800">{pass.short}</div>
-          </button>
-        ))}
+        {PASS_TYPES.map((pass) => {
+          const blocked = dateExpired || passStatuses[pass.id] === "blocked";
+
+          return (
+            <button
+              key={pass.id}
+              type="button"
+              disabled={blocked}
+              onClick={() => onPassTypeChange(pass.id)}
+              className={classNames(
+                "rounded-2xl border px-1.5 py-2 text-center transition",
+                blocked
+                  ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                  : quickPassType === pass.id
+                    ? "border-violet-400 bg-white shadow-sm"
+                    : "border-white/80 bg-white/70 hover:border-violet-200"
+              )}
+            >
+              <div
+                className={classNames(
+                  "mx-auto flex h-7 w-7 items-center justify-center",
+                  blocked && "opacity-50 grayscale"
+                )}
+              >
+                <PassIcon passType={pass.id} size="h-6 w-6" />
+              </div>
+              <div className={classNames("mt-1 text-[10px] font-medium", blocked ? "text-slate-500" : "text-zinc-800")}>
+                {pass.short}
+              </div>
+              <div className="mt-0.5 text-[9px] font-medium text-slate-500">
+                {blocked ? "Blocked" : passStatuses[pass.id] === "unavailable" ? "Full" : "Open"}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
@@ -125,6 +146,7 @@ function QuickWatchFields({
 export function CalendarSection({
   displayedMonth,
   calendarRows,
+  calendarCellStates,
   watchedByDate,
   defaultPassType,
   defaultPreferredPark,
@@ -136,6 +158,7 @@ export function CalendarSection({
 }: {
   displayedMonth: string;
   calendarRows: Array<Array<CalendarCell | null>>;
+  calendarCellStates: Map<string, { expired: boolean; passStatuses: Record<PassType, StatusType> }>;
   watchedByDate: Map<string, WatchItem[]>;
   defaultPassType: PassType;
   defaultPreferredPark: ParkOption;
@@ -158,8 +181,16 @@ export function CalendarSection({
   const [quickSyncFrequency, setQuickSyncFrequency] = useState<FrequencyType>(defaultSyncFrequency);
 
   function openQuickWatch(date: string) {
+    const state = calendarCellStates.get(date);
+    if (state?.expired) return;
+
+    const nextPassType =
+      !state || state.passStatuses[defaultPassType] !== "blocked"
+        ? defaultPassType
+        : PASS_TYPES.find((pass) => state.passStatuses[pass.id] !== "blocked")?.id ?? defaultPassType;
+
     setExpandedDate((current) => (current === date ? null : date));
-    setQuickPassType(defaultPassType);
+    setQuickPassType(nextPassType);
     setQuickPreferredPark(defaultPreferredPark);
     setQuickEitherParkTieBreaker(defaultEitherParkTieBreaker);
     setQuickSyncFrequency(defaultSyncFrequency);
@@ -236,6 +267,12 @@ export function CalendarSection({
 
               const items = watchedByDate.get(cell.date) ?? [];
               const isExpanded = expandedDate === cell.date;
+              const cellState = calendarCellStates.get(cell.date);
+              const expired = cellState?.expired ?? false;
+              const passStatuses =
+                cellState?.passStatuses ??
+                Object.fromEntries(PASS_TYPES.map((pass) => [pass.id, "unavailable"])) as Record<PassType, StatusType>;
+              const hasWatchablePass = PASS_TYPES.some((pass) => passStatuses[pass.id] !== "blocked");
 
               return (
                 <div
@@ -244,6 +281,8 @@ export function CalendarSection({
                     "relative min-h-[110px] rounded-[20px] p-2.5 shadow-sm transition sm:min-h-[150px] sm:rounded-[24px] sm:p-3",
                     items.length > 0
                       ? "border border-violet-300 bg-violet-50/50"
+                      : expired
+                        ? "border border-slate-200 bg-slate-100/90"
                       : "border border-zinc-200 bg-white",
                     isExpanded && "z-20"
                   )}
@@ -260,15 +299,22 @@ export function CalendarSection({
 
                   {items.length === 0 ? (
                     <div className="mt-5 flex justify-center sm:mt-6">
-                      <button
-                        type="button"
-                        onClick={() => openQuickWatch(cell.date)}
-                        className="mx-auto inline-flex h-7 w-fit items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 px-3 text-xs font-medium text-violet-900 transition hover:bg-violet-100 sm:h-9 sm:px-4 sm:text-sm"
-                      >
-                        Watch
-                      </button>
+                      {expired || !hasWatchablePass ? (
+                        <div className="mx-auto inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400 sm:h-10 sm:w-10">
+                          <StatusIcon status="blocked" size="h-4 w-4 sm:h-5 sm:w-5" />
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openQuickWatch(cell.date)}
+                          className="mx-auto inline-flex h-8 w-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-900 transition hover:bg-violet-100 sm:h-10 sm:w-10"
+                          aria-label={`Add watch for ${cell.date}`}
+                        >
+                          <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </button>
+                      )}
 
-                      {isExpanded ? (
+                      {isExpanded && !expired ? (
                         <div
                           className={classNames(
                             "absolute top-[78px] z-30 hidden w-[260px] rounded-[24px] border border-violet-200 bg-white p-3 shadow-xl shadow-violet-100 md:block",
@@ -276,7 +322,9 @@ export function CalendarSection({
                           )}
                         >
                           <QuickWatchFields
+                            dateExpired={expired}
                             quickPassType={quickPassType}
+                            passStatuses={passStatuses}
                             quickPreferredPark={quickPreferredPark}
                             quickEitherParkTieBreaker={quickEitherParkTieBreaker}
                             quickSyncFrequency={quickSyncFrequency}
@@ -378,7 +426,12 @@ export function CalendarSection({
             <div className="mt-4">
               <QuickWatchFields
                 compact
+                dateExpired={calendarCellStates.get(expandedDate)?.expired ?? false}
                 quickPassType={quickPassType}
+                passStatuses={
+                  calendarCellStates.get(expandedDate)?.passStatuses ??
+                  (Object.fromEntries(PASS_TYPES.map((pass) => [pass.id, "unavailable"])) as Record<PassType, StatusType>)
+                }
                 quickPreferredPark={quickPreferredPark}
                 quickEitherParkTieBreaker={quickEitherParkTieBreaker}
                 quickSyncFrequency={quickSyncFrequency}
