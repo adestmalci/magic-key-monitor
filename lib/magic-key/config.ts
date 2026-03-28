@@ -2,6 +2,7 @@ import type { FrequencyType, ParkOption, PassType, StatusType } from "./types";
 
 export const STORAGE_KEY = "magic-key-monitor-v4";
 export const ENDPOINT_URL = "/api/magic-key-status";
+export const DISNEY_IMPORT_FRESHNESS_MS = 1000 * 60 * 15;
 
 export const PASS_TYPES: Array<{
   id: PassType;

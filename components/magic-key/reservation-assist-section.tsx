@@ -33,6 +33,8 @@ import {
   classNames,
   formatSyncTime,
   formatWatchDate,
+  getLatestPlannerHubImportAt,
+  isPlannerHubImportFresh,
   resolveAutoBookingPark,
   resolveStatus,
 } from "../../lib/magic-key/utils";
@@ -549,58 +551,58 @@ export function ReservationAssistSection({
   const minimalConnectedState = effectiveConnectionStatus === "connected" && !activeDisneyJob && !hasTerminalFailure;
   const showPairingSection = (!minimalConnectedState && !activeLocalDevice) || Boolean(pairToken);
   const importState = plannerHubConnection.lastImportStatus || (importJobActive ? "processing" : "");
-  const importStatusLabel =
-    importState === "queued"
-      ? "Import queued"
-      : importState === "processing"
-        ? "Import running"
-        : importState === "completed"
-          ? "Import finished"
-          : importState === "failed"
-            ? "Import failed"
-            : plannerHubConnection.lastImportJobId
-              ? "Last import"
-              : "No import yet";
-  const importStatusTone =
-    importState === "completed"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-      : importState === "failed"
-        ? "border-rose-200 bg-rose-50 text-rose-900"
-        : importState === "queued" || importState === "processing"
-          ? "border-sky-200 bg-sky-50 text-sky-900"
-          : "border-zinc-200 bg-zinc-50 text-zinc-700";
-  const importSummaryMessage =
-    importState === "queued"
-      ? plannerHubConnection.lastImportMessage || "The import job is queued and waiting for your Mac."
-      : importState === "processing"
-        ? plannerHubConnection.lastImportMessage || "The local worker is refreshing the connected Disney party."
-        : importState === "completed"
-          ? plannerHubConnection.lastImportedMemberCount > 0
-            ? `Imported ${plannerHubConnection.lastImportedMemberCount} connected Disney ${plannerHubConnection.lastImportedMemberCount === 1 ? "member" : "members"}.`
-            : plannerHubConnection.lastImportMessage || "Import finished with zero accepted members."
-          : plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "No import attempt has finished yet.";
   const importDiagnostics = latestImportJob?.diagnostics;
   const shouldShowImportDiagnostics =
     importJobActive ||
     importState === "failed" ||
     (importState === "completed" && plannerHubConnection.lastImportedMemberCount === 0 && Boolean(plannerHubConnection.lastImportJobId));
-  const showHealthyPartySync = minimalConnectedState && importState === "completed" && plannerHubConnection.lastImportedMemberCount > 0;
-  const bookingState = plannerHubBooking.lastBookingStatus || (bookingJobActive ? "processing" : "");
+  const importIsRefreshing = importState === "queued" || importState === "processing";
   const bookingTimedOut =
     plannerHubBooking.status === "failed" &&
     /stopped responding|timed out/i.test(
       `${plannerHubBooking.lastBookingError} ${plannerHubBooking.lastBookingMessage} ${plannerHubBooking.lastResultMessage}`
     );
-  const showBookingAttemptCard =
-    watchItems.length > 0 &&
-    (bookingJobActive ||
-      plannerHubBooking.status === "booked" ||
+  const bookingTargetsCurrent = Boolean(
+    currentTarget &&
+      (latestBookingJob?.targetWatchItemId === currentTarget.id || plannerHubBooking.lastBookedWatchItemId === currentTarget.id)
+  );
+  const importTargetsCurrent = Boolean(
+    currentTarget &&
+      (latestImportJob?.targetWatchItemId === currentTarget.id ||
+        (!latestImportJob?.targetWatchItemId &&
+          currentTarget.selectedImportedMemberIds.length > 0 &&
+          targetAutoBookingEnabled))
+  );
+  const currentBookingIsActive = Boolean(
+    currentTarget &&
+      targetAutoBookingEnabled &&
+      bookingJobActive &&
+      latestBookingJob?.targetWatchItemId === currentTarget.id
+  );
+  const currentBookingWasJustQueued = Boolean(
+    currentTarget &&
+      targetAutoBookingEnabled &&
+      !currentBookingIsActive &&
+      plannerHubBooking.lastBookingStatus === "queued" &&
+      plannerHubBooking.lastBookedWatchItemId === currentTarget.id
+  );
+  const currentImportRefreshActive = Boolean(importIsRefreshing && importTargetsCurrent);
+  const currentBookingResultRelevant =
+    bookingTargetsCurrent &&
+    (plannerHubBooking.status === "booked" ||
       plannerHubBooking.status === "failed" ||
       plannerHubBooking.status === "paused_login" ||
-      plannerHubBooking.status === "paused_mismatch" ||
-      bookingState === "processing");
-  const bookingStatusLabel =
-    plannerHubBooking.status === "booked"
+      plannerHubBooking.status === "paused_mismatch");
+  const showBookingAttemptCard = Boolean(
+    currentTarget &&
+      (currentImportRefreshActive ||
+        currentBookingIsActive ||
+        currentBookingWasJustQueued ||
+        currentBookingResultRelevant)
+  );
+  const bookingStatusLabel = currentImportRefreshActive
+    ? "Refreshing connected party"
+    : plannerHubBooking.status === "booked"
       ? "Booked"
       : plannerHubBooking.status === "paused_login"
         ? "Paused for login"
@@ -610,19 +612,32 @@ export function ReservationAssistSection({
             ? bookingTimedOut
               ? "Booking timed out"
               : "Booking failed"
-            : bookingJobActive || plannerHubBooking.status === "attempting"
+            : currentBookingIsActive
               ? "Booking in progress"
-              : "Ready";
-  const bookingStatusTone =
-    plannerHubBooking.status === "booked"
+              : currentBookingWasJustQueued
+                ? "Queued"
+                : "Ready";
+  const bookingStatusTone = currentImportRefreshActive
+    ? "border-sky-200 bg-sky-50 text-sky-900"
+    : plannerHubBooking.status === "booked"
       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
       : plannerHubBooking.status === "paused_login"
         ? "border-amber-200 bg-amber-50 text-amber-900"
         : plannerHubBooking.status === "paused_mismatch" || plannerHubBooking.status === "failed"
           ? "border-rose-200 bg-rose-50 text-rose-900"
-          : bookingJobActive || plannerHubBooking.status === "attempting"
+          : currentBookingIsActive || currentBookingWasJustQueued
             ? "border-sky-200 bg-sky-50 text-sky-900"
             : "border-zinc-200 bg-zinc-50 text-zinc-700";
+  const bookingAttemptMessage = currentImportRefreshActive
+    ? latestImportJob?.lastMessage ||
+      plannerHubConnection.lastImportMessage ||
+      "Refreshing the connected Disney party before auto-booking continues."
+    : currentBookingWasJustQueued
+      ? plannerHubBooking.lastBookingMessage || "A booking attempt was queued and is waiting for your Mac to claim it."
+      : plannerHubBooking.lastResultMessage || "No booking result yet.";
+  const bookingAttemptAction = currentImportRefreshActive
+    ? "Reserve is refreshing the connected Disney party before booking continues."
+    : plannerHubBooking.lastRequiredActionMessage || "No action required yet.";
   const summarizedActionMessage =
     plannerHubConnection.lastRequiredActionMessage &&
     plannerHubConnection.lastRequiredActionMessage !== latestWorkerMessage &&
@@ -733,6 +748,54 @@ export function ReservationAssistSection({
     targetAutoBookingEnabled,
   ]);
 
+  const hasReserveTargetSelections = useMemo(
+    () => watchItems.some((item) => item.selectedImportedMemberIds.length > 0),
+    [watchItems]
+  );
+  const latestImportAt = getLatestPlannerHubImportAt(plannerHubConnection);
+  const importFresh = isPlannerHubImportFresh(plannerHubConnection);
+  const importIsStale =
+    Boolean(latestImportAt) &&
+    plannerHubConnection.lastImportStatus === "completed" &&
+    plannerHubConnection.lastImportedMemberCount > 0 &&
+    !importFresh &&
+    !importIsRefreshing;
+  const importCardLabel = importIsRefreshing
+    ? "Refreshing now"
+    : importFresh
+      ? "Fresh"
+      : importIsStale
+        ? "Stale"
+        : importState === "failed"
+          ? "Failed"
+          : plannerHubConnection.lastImportedMemberCount > 0
+            ? "Last snapshot"
+            : "No import yet";
+  const importCardTone = importIsRefreshing
+    ? "border-sky-200 bg-sky-50 text-sky-900"
+    : importFresh
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : importIsStale
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : importState === "failed"
+          ? "border-rose-200 bg-rose-50 text-rose-900"
+          : "border-zinc-200 bg-zinc-50 text-zinc-700";
+  const importCardMessage = importIsRefreshing
+    ? plannerHubConnection.lastImportMessage || "The active local Mac is refreshing the connected Disney party now."
+    : importFresh
+      ? `Last imported ${formatSyncTime(latestImportAt)}. ${plannerHubConnection.lastImportedMemberCount} connected Disney member${
+          plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"
+        } found.`
+      : importIsStale
+        ? `Last imported ${formatSyncTime(latestImportAt)}. This is the last known connected Disney party snapshot, and it is now stale.${
+            hasReserveTargetSelections
+              ? " Reserve refreshes this automatically once a day for selected targets and again right before auto-booking starts."
+              : " Refresh it before relying on imported member targeting again."
+          }`
+        : importState === "failed"
+          ? plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "The last connected-party import failed."
+          : plannerHubConnection.lastImportMessage || "No connected Disney party import has finished yet.";
+
   const watchTargetStatus = useMemo(() => {
     if (!currentTarget) {
       return bookingReadiness;
@@ -740,8 +803,10 @@ export function ReservationAssistSection({
 
     const bookingResultTargetsCurrent =
       plannerHubBooking.lastBookedWatchItemId === currentTarget.id ||
-      latestBookingJob?.targetWatchItemId === currentTarget.id ||
-      (!plannerHubBooking.lastBookedWatchItemId && !latestBookingJob?.targetWatchItemId);
+      latestBookingJob?.targetWatchItemId === currentTarget.id;
+    const importTargetsCurrent =
+      latestImportJob?.targetWatchItemId === currentTarget.id ||
+      (!latestImportJob?.targetWatchItemId && targetAutoBookingEnabled && currentTarget.selectedImportedMemberIds.length > 0);
 
     if (bookingResultTargetsCurrent && plannerHubBooking.status === "paused_mismatch") {
       return {
@@ -751,6 +816,17 @@ export function ReservationAssistSection({
           plannerHubBooking.lastRequiredActionMessage ||
           plannerHubBooking.lastResultMessage ||
           "The connected Disney party or watched-date target changed before the booking attempt could continue.",
+      };
+    }
+
+    if (importIsRefreshing && importTargetsCurrent) {
+      return {
+        label: "Refreshing party",
+        tone: "border-sky-200 bg-sky-50 text-sky-900",
+        message:
+          latestImportJob?.lastMessage ||
+          plannerHubConnection.lastImportMessage ||
+          "Refreshing the connected Disney party before auto-booking continues.",
       };
     }
 
@@ -791,11 +867,13 @@ export function ReservationAssistSection({
 
     const currentBookingIsActive =
       bookingJobActive &&
-      (!latestBookingJob?.targetWatchItemId || latestBookingJob.targetWatchItemId === currentTarget.id);
+      targetAutoBookingEnabled &&
+      latestBookingJob?.targetWatchItemId === currentTarget.id;
     const currentBookingWasJustQueued =
       !currentBookingIsActive &&
       plannerHubBooking.lastBookingStatus === "queued" &&
-      plannerHubBooking.lastBookedWatchItemId === currentTarget.id;
+      plannerHubBooking.lastBookedWatchItemId === currentTarget.id &&
+      targetAutoBookingEnabled;
 
     if (currentBookingIsActive) {
       return {
@@ -833,12 +911,16 @@ export function ReservationAssistSection({
     currentTargetNeedsTieBreaker,
     latestBookingJob?.lastMessage,
     latestBookingJob?.targetWatchItemId,
+    latestImportJob?.lastMessage,
+    latestImportJob?.targetWatchItemId,
+    importIsRefreshing,
     plannerHubBooking.lastRequiredActionMessage,
     plannerHubBooking.lastResultMessage,
     plannerHubBooking.lastBookedWatchItemId,
     plannerHubBooking.lastBookingMessage,
     plannerHubBooking.lastBookingStatus,
     plannerHubBooking.status,
+    plannerHubConnection.lastImportMessage,
     targetAutoBookingEnabled,
   ]);
 
@@ -1060,79 +1142,62 @@ export function ReservationAssistSection({
             </div>
           )}
 
-          {showHealthyPartySync ? (
-            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
-              <div className="flex items-center justify-between gap-3">
-                <div className="font-semibold">Connected party import</div>
-                <div className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold">Ready</div>
-              </div>
-              <p className="mt-2 leading-6">
-                Last imported {formatSyncTime(plannerHubConnection.lastImportFinishedAt || plannerHubConnection.lastImportedAt)}.{" "}
-                {plannerHubConnection.lastImportedMemberCount} connected Disney member
-                {plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"} found. This refreshes when you reconnect,
-                import manually, or right before a booking attempt.
-              </p>
+          <div className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${importCardTone}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-semibold">Connected party import</div>
+              <div className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold">{importCardLabel}</div>
             </div>
-          ) : (
-            <div className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${importStatusTone}`}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="font-semibold">Import status</div>
-                <div className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold">
-                  {importStatusLabel}
-                </div>
-              </div>
-              <p className="mt-2 leading-6">{importSummaryMessage}</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-                <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
-                  {plannerHubConnection.lastImportFinishedAt
-                    ? `Last import ${formatSyncTime(plannerHubConnection.lastImportFinishedAt)}`
-                    : plannerHubConnection.lastImportQueuedAt
-                      ? `Queued ${formatSyncTime(plannerHubConnection.lastImportQueuedAt)}`
-                      : "No import queued yet"}
-                </span>
-                <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
-                  {plannerHubConnection.lastImportedMemberCount} accepted member{plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"}
-                </span>
-              </div>
-              {shouldShowImportDiagnostics && (
-                <details className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-zinc-700">
-                  <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-900">Import diagnostics</summary>
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Last import result</div>
-                      <div className="mt-1 text-sm font-medium text-zinc-900">
-                        {plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "No import result recorded yet"}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Rows seen</div>
-                      <div className="mt-1 text-sm font-medium text-zinc-900">
-                        {importDiagnostics ? importDiagnostics.extractedRowCount : "No diagnostics recorded yet"}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 md:col-span-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Accepted vs rejected</div>
-                      <div className="mt-1 text-sm font-medium text-zinc-900">
-                        {importDiagnostics
-                          ? `${importDiagnostics.acceptedMemberCount} accepted • ${importDiagnostics.rejectedMemberCount} rejected`
-                          : "No diagnostics recorded yet"}
-                      </div>
+            <p className="mt-2 leading-6">{importCardMessage}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+              <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
+                {latestImportAt
+                  ? `Last import ${formatSyncTime(latestImportAt)}`
+                  : plannerHubConnection.lastImportQueuedAt
+                    ? `Queued ${formatSyncTime(plannerHubConnection.lastImportQueuedAt)}`
+                    : "No import queued yet"}
+              </span>
+              <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
+                {plannerHubConnection.lastImportedMemberCount} accepted member{plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"}
+              </span>
+            </div>
+            {shouldShowImportDiagnostics && (
+              <details className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-4 text-zinc-700">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-900">Import diagnostics</summary>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Last import result</div>
+                    <div className="mt-1 text-sm font-medium text-zinc-900">
+                      {plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "No import result recorded yet"}
                     </div>
                   </div>
-                  {importDiagnostics?.pageUrl && (
-                    <p className="mt-3 break-all text-xs leading-5 text-zinc-500">{importDiagnostics.pageUrl}</p>
-                  )}
-                  {importDiagnostics?.rejectionReasons?.length ? (
-                    <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5 text-zinc-600">
-                      {importDiagnostics.rejectionReasons.map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </details>
-              )}
-            </div>
-          )}
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Rows seen</div>
+                    <div className="mt-1 text-sm font-medium text-zinc-900">
+                      {importDiagnostics ? importDiagnostics.extractedRowCount : "No diagnostics recorded yet"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 md:col-span-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Accepted vs rejected</div>
+                    <div className="mt-1 text-sm font-medium text-zinc-900">
+                      {importDiagnostics
+                        ? `${importDiagnostics.acceptedMemberCount} accepted • ${importDiagnostics.rejectedMemberCount} rejected`
+                        : "No diagnostics recorded yet"}
+                    </div>
+                  </div>
+                </div>
+                {importDiagnostics?.pageUrl && (
+                  <p className="mt-3 break-all text-xs leading-5 text-zinc-500">{importDiagnostics.pageUrl}</p>
+                )}
+                {importDiagnostics?.rejectionReasons?.length ? (
+                  <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5 text-zinc-600">
+                    {importDiagnostics.rejectionReasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </details>
+            )}
+          </div>
 
           {(!minimalConnectedState || showExpandedTimeline) && (
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
@@ -1764,18 +1829,24 @@ export function ReservationAssistSection({
                   <div className="font-semibold">Booking attempt</div>
                   <div className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold">{bookingStatusLabel}</div>
                 </div>
-                <p className="mt-2 leading-6">{plannerHubBooking.lastResultMessage || "No booking result yet."}</p>
-                {(plannerHubBooking.lastBookingFinishedAt || plannerHubBooking.lastBookingQueuedAt) && (
+                <p className="mt-2 leading-6">{bookingAttemptMessage}</p>
+                {(currentImportRefreshActive
+                  ? plannerHubConnection.lastImportFinishedAt || plannerHubConnection.lastImportQueuedAt
+                  : plannerHubBooking.lastBookingFinishedAt || plannerHubBooking.lastBookingQueuedAt) && (
                   <p className="mt-3 text-xs font-semibold text-zinc-700">
-                    {plannerHubBooking.lastBookingFinishedAt
-                      ? `Last attempt ${formatSyncTime(plannerHubBooking.lastBookingFinishedAt)}`
-                      : `Queued ${formatSyncTime(plannerHubBooking.lastBookingQueuedAt)}`}
+                    {currentImportRefreshActive
+                      ? plannerHubConnection.lastImportFinishedAt
+                        ? `Last import ${formatSyncTime(plannerHubConnection.lastImportFinishedAt)}`
+                        : `Queued ${formatSyncTime(plannerHubConnection.lastImportQueuedAt)}`
+                      : plannerHubBooking.lastBookingFinishedAt
+                        ? `Last attempt ${formatSyncTime(plannerHubBooking.lastBookingFinishedAt)}`
+                        : `Queued ${formatSyncTime(plannerHubBooking.lastBookingQueuedAt)}`}
                   </p>
                 )}
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
                 <div className="font-semibold text-zinc-900">Required action</div>
-                <p className="mt-2 leading-6">{plannerHubBooking.lastRequiredActionMessage || "No action required yet."}</p>
+                <p className="mt-2 leading-6">{bookingAttemptAction}</p>
               </div>
             </div>
           ) : null}

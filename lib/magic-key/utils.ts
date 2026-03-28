@@ -1,4 +1,14 @@
-import type { FeedRow, ImportedDisneyMember, ParkTieBreaker, SchedulerHealth, StatusType, SyncMeta, WatchItem } from "./types";
+import type {
+  FeedRow,
+  ImportedDisneyMember,
+  ParkTieBreaker,
+  PlannerHubConnectionState,
+  SchedulerHealth,
+  StatusType,
+  SyncMeta,
+  WatchItem,
+} from "./types";
+import { DISNEY_IMPORT_FRESHNESS_MS } from "./config";
 
 export const WATCH_DATE_TIME_ZONE = "America/Los_Angeles";
 
@@ -71,6 +81,22 @@ export function currentWatchDateKey(now = Date.now(), timeZone = WATCH_DATE_TIME
 export function isPastWatchDate(dateStr: string, now = Date.now(), timeZone = WATCH_DATE_TIME_ZONE) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return false;
   return dateStr < currentWatchDateKey(now, timeZone);
+}
+
+export function getLatestPlannerHubImportAt(connection: Pick<PlannerHubConnectionState, "lastImportFinishedAt" | "lastImportedAt">) {
+  return connection.lastImportFinishedAt || connection.lastImportedAt || "";
+}
+
+export function isPlannerHubImportFresh(
+  connection: Pick<PlannerHubConnectionState, "lastImportFinishedAt" | "lastImportedAt" | "lastImportStatus">,
+  now = Date.now()
+) {
+  const lastImportAt = getLatestPlannerHubImportAt(connection);
+  if (!lastImportAt || connection.lastImportStatus !== "completed") {
+    return false;
+  }
+
+  return now - Date.parse(lastImportAt) <= DISNEY_IMPORT_FRESHNESS_MS;
 }
 
 export function comparePriority(status: StatusType) {
