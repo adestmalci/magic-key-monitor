@@ -130,6 +130,25 @@ final class WorkerController: ObservableObject {
         lastMessage = "The local Disney worker is stopped."
     }
 
+    func restartWorker() {
+        let wasRunning = isRunning
+        shouldKeepWorkerAlive = true
+        intentionalStop = false
+
+        if wasRunning {
+            workerProcess?.terminate()
+            workerProcess = nil
+            workerOutputPipe?.fileHandleForReading.readabilityHandler = nil
+            workerOutputPipe = nil
+            status = "Stopped"
+            lastError = ""
+            lastMessage = "Restarting the local Disney worker..."
+            return
+        }
+
+        startWorker()
+    }
+
     private func launchWorker(payload: PairingPayload) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -304,6 +323,15 @@ struct TrayContentView: View {
                     .disabled(!controller.isRunning)
                 }
 
+                HStack {
+                    Button("Restart worker") {
+                        controller.restartWorker()
+                    }
+                    Button("Quit app") {
+                        NSApplication.shared.terminate(nil)
+                    }
+                }
+
                 Button("Open Disney local login") {
                     controller.openDisneyLogin()
                 }
@@ -348,6 +376,10 @@ struct TrayMenuView: View {
             }
             .disabled(controller.isRunning)
 
+            Button("Restart worker") {
+                controller.restartWorker()
+            }
+
             Button("Open Disney local login") {
                 controller.openDisneyLogin()
             }
@@ -356,6 +388,10 @@ struct TrayMenuView: View {
                 controller.stopWorker()
             }
             .disabled(!controller.isRunning)
+
+            Button("Quit app") {
+                NSApplication.shared.terminate(nil)
+            }
         }
         .padding(14)
         .frame(width: 280)
