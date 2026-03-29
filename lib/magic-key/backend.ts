@@ -2514,6 +2514,8 @@ async function synchronizePlannerHubImportState(
       lastImportMessage: `Imported ${importedCount} connected Disney members.`,
       lastImportError: "",
       lastImportedMemberCount: importedCount,
+      lastAuthFailureReason: "",
+      lastRequiredActionMessage: "",
     },
     preferences.plannerHubConnection.disneyEmail
   );

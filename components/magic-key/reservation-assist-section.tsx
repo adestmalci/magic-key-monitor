@@ -709,6 +709,11 @@ export function ReservationAssistSection({
     !plannerHubConnection.lastRequiredActionMessage.includes("claim this Disney connect job")
       ? plannerHubConnection.lastRequiredActionMessage
       : "";
+  const lastWorkerIssueLabel = /login|password|one-time code|auth|session expired/i.test(
+    plannerHubConnection.lastAuthFailureReason
+  )
+    ? "Last auth failure"
+    : "Last worker issue";
   const importButtonLabel =
     importedDisneyMembers.length > 0 ? "Refresh connected party" : "Import connected members";
   const connectButtonLabel =
@@ -1677,7 +1682,7 @@ export function ReservationAssistSection({
               )}
               {plannerHubConnection.lastAuthFailureReason && (
                 <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-900">
-                  <div className="font-semibold">Last auth failure</div>
+                  <div className="font-semibold">{lastWorkerIssueLabel}</div>
                   <p className="mt-2 leading-6">{plannerHubConnection.lastAuthFailureReason}</p>
                 </div>
               )}
