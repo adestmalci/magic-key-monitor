@@ -1197,9 +1197,12 @@ export default function Home() {
     [pushToast, sessionUser]
   );
 
-  const importConnectedDisneyMembers = useCallback(async () => {
+  const importConnectedDisneyMembers = useCallback(async (options?: { background?: boolean }) => {
+    const background = options?.background ?? false;
     if (!sessionUser) {
-      pushToast("error", "Sign in first so the Disney member import can stay tied to your account.");
+      if (!background) {
+        pushToast("error", "Sign in first so the Disney member import can stay tied to your account.");
+      }
       return false;
     }
 
@@ -1209,7 +1212,9 @@ export default function Home() {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      pushToast("error", data.error || "We couldn't queue the Disney member import.");
+      if (!background) {
+        pushToast("error", data.error || "We couldn't queue the Disney member import.");
+      }
       return false;
     }
 
@@ -1217,7 +1222,9 @@ export default function Home() {
     setAccountSaveMessage(`Disney import is queued for ${sessionUser.email}.`);
     await loadDashboardState();
     await loadDisneyWorkerStatus();
-    pushToast("success", "Disney member refresh queued. Your active Mac will pull the latest connected party.");
+    if (!background) {
+      pushToast("success", "Disney member refresh queued. Your active Mac will pull the latest connected party.");
+    }
     return data.jobId || true;
   }, [loadDashboardState, loadDisneyWorkerStatus, pushToast, sessionUser]);
 

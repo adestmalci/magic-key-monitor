@@ -60,7 +60,7 @@ type ReservationAssistSectionProps = {
   ) => void;
   onConnectDisney: (disneyEmail: string, password: string) => Promise<boolean | string> | boolean | string;
   onCreateLocalWorkerPairToken: (deviceName: string) => Promise<string> | string;
-  onImportConnectedMembers: () => Promise<boolean | string> | boolean | string;
+  onImportConnectedMembers: (options?: { background?: boolean }) => Promise<boolean | string> | boolean | string;
   onResetDisneyConnection: () => Promise<boolean> | boolean;
   onRefreshState: () => Promise<void> | void;
   onRefreshDisneyStatus: () => Promise<void> | void;
@@ -310,6 +310,7 @@ export function ReservationAssistSection({
   const [pairToken, setPairToken] = useState("");
   const [isCreatingPairToken, setIsCreatingPairToken] = useState(false);
   const autoRefreshAttemptRef = useRef("");
+  const autoRefreshInFlightRef = useRef("");
   const connectJobActive = latestConnectJob?.status === "queued" || latestConnectJob?.status === "processing";
   const importJobActive = latestImportJob?.status === "queued" || latestImportJob?.status === "processing";
   const bookingJobActive = latestBookingJob?.status === "queued" || latestBookingJob?.status === "processing";
@@ -786,17 +787,20 @@ export function ReservationAssistSection({
         } found.`
       : importIsStale
         ? `Last imported ${formatSyncTime(latestImportAt)}. This is the last known connected Disney party snapshot, and it is now stale.${
-            hasReserveTargets
-              ? " Reserve refreshes this automatically once a day for active watched dates and again right before auto-booking starts."
-              : " Refresh it before relying on imported member targeting again."
+            !sessionUser
+              ? " Sign in to let Reserve refresh this automatically for active watched dates and again right before auto-booking starts."
+              : hasReserveTargets
+                ? " Reserve refreshes this automatically once a day for active watched dates and again right before auto-booking starts."
+                : " Refresh it before relying on imported member targeting again."
           }`
         : importState === "failed"
           ? plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "The last connected-party import failed."
           : plannerHubConnection.lastImportMessage || "No connected Disney party import has finished yet.";
 
   useEffect(() => {
-    if (!currentTarget || !hasReserveTargets) {
+    if (!currentTarget || !hasReserveTargets || !sessionUser) {
       autoRefreshAttemptRef.current = "";
+      autoRefreshInFlightRef.current = "";
       return;
     }
 
@@ -807,17 +811,19 @@ export function ReservationAssistSection({
       importIsRefreshing ||
       bookingJobActive
     ) {
+      autoRefreshInFlightRef.current = "";
       return;
     }
 
     const refreshKey = `${currentTarget.id}:${latestImportAt}`;
-    if (autoRefreshAttemptRef.current === refreshKey) {
+    if (autoRefreshAttemptRef.current === refreshKey || autoRefreshInFlightRef.current === refreshKey) {
       return;
     }
-    autoRefreshAttemptRef.current = refreshKey;
+    autoRefreshInFlightRef.current = refreshKey;
     void (async () => {
-      const queued = await onImportConnectedMembers();
+      const queued = await onImportConnectedMembers({ background: true });
       if (queued) {
+        autoRefreshAttemptRef.current = refreshKey;
         onPlannerHubConnectionChange({
           lastImportJobId: typeof queued === "string" ? queued : plannerHubConnection.lastImportJobId,
           lastImportQueuedAt: new Date().toISOString(),
@@ -827,8 +833,10 @@ export function ReservationAssistSection({
           status: "importing",
         });
       } else {
+        autoRefreshAttemptRef.current = "";
         void onRefreshDisneyStatus();
       }
+      autoRefreshInFlightRef.current = "";
     })();
   }, [
     bookingJobActive,
@@ -843,6 +851,7 @@ export function ReservationAssistSection({
     onRefreshDisneyStatus,
     plannerHubConnection.lastImportJobId,
     plannerHubConnection.hasLocalSession,
+    sessionUser,
   ]);
 
   const watchTargetStatus = useMemo(() => {
