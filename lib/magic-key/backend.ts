@@ -1426,6 +1426,7 @@ export async function upsertPreferencesForUser(
   const user = getUserFromState(workingState, userId);
   const currentConnection = preferences.plannerHubConnection;
   const stepTwoWasVerified = preferences.reservationAssist.stepTwoVerified;
+  const bookingWasEnabled = preferences.plannerHubBooking.enabled;
 
   preferences.emailEnabled = patch.emailEnabled ?? preferences.emailEnabled;
   preferences.emailAddress = patch.emailAddress ?? preferences.emailAddress;
@@ -1484,7 +1485,10 @@ export async function upsertPreferencesForUser(
   latestPreferences.importedDisneyMembers = preferences.importedDisneyMembers;
   latestPreferences.savedReservationParties = preferences.savedReservationParties;
 
-  if (!stepTwoWasVerified && latestPreferences.reservationAssist.stepTwoVerified) {
+  if (
+    (!stepTwoWasVerified && latestPreferences.reservationAssist.stepTwoVerified) ||
+    (!bookingWasEnabled && latestPreferences.plannerHubBooking.enabled)
+  ) {
     queueImmediateReadyBookingInState(latestState, userId);
   }
 
