@@ -181,8 +181,12 @@ function deriveConnectionStatus(
   const latestJobType = plannerHubConnection.lastJobType;
   const latestJobStatus = plannerHubConnection.latestJobStatus;
   const latestPhase = plannerHubConnection.latestPhase;
+  const hasConfirmedDisneySession = plannerHubConnection.hasLocalSession || plannerHubConnection.hasEncryptedSession;
 
   if (latestJobStatus === "processing" || latestJobStatus === "queued") {
+    if (latestPhase === "session_captured" && hasConfirmedDisneySession) {
+      return "connected";
+    }
     if (latestJobType === "import") return "importing";
     if (latestJobType === "connect") return "pending_connect";
   }
