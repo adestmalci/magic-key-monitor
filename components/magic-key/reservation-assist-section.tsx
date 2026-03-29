@@ -58,7 +58,7 @@ type ReservationAssistSectionProps = {
   onWatchItemBookingChange: (
     id: string,
     patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode" | "eitherParkTieBreaker">>
-  ) => void;
+  ) => Promise<void> | void;
   onConnectDisney: (disneyEmail: string, password: string) => Promise<boolean | string> | boolean | string;
   onCreateLocalWorkerPairToken: (deviceName: string) => Promise<string> | string;
   onImportConnectedMembers: (options?: { background?: boolean }) => Promise<boolean | string> | boolean | string;
@@ -344,6 +344,7 @@ export function ReservationAssistSection({
   const [isImporting, setIsImporting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isTogglingAutoBooking, setIsTogglingAutoBooking] = useState(false);
   const [pairDeviceName, setPairDeviceName] = useState("My Mac");
   const [pairToken, setPairToken] = useState("");
   const [isCreatingPairToken, setIsCreatingPairToken] = useState(false);
@@ -1235,18 +1236,23 @@ export function ReservationAssistSection({
     }
   }
 
-  function handleToggleAutoBooking() {
+  async function handleToggleAutoBooking() {
     if (!currentTarget || currentTargetNeedsTieBreaker) return;
 
     const nextEnabled = !targetAutoBookingEnabled;
-    onPlannerHubBookingChange({
-      enabled: nextEnabled ? true : watchItems.some((item) => item.id !== currentTarget.id && item.bookingMode === "watch_and_attempt"),
-      lastAttemptedAt: new Date().toISOString(),
-    });
-    onWatchItemBookingChange(currentTarget.id, {
-      plannerHubId: plannerHubConnection.plannerHubId || "primary",
-      bookingMode: nextEnabled ? "watch_and_attempt" : "watch_only",
-    });
+    setIsTogglingAutoBooking(true);
+    try {
+      onPlannerHubBookingChange({
+        enabled: nextEnabled ? true : watchItems.some((item) => item.id !== currentTarget.id && item.bookingMode === "watch_and_attempt"),
+        lastAttemptedAt: new Date().toISOString(),
+      });
+      await onWatchItemBookingChange(currentTarget.id, {
+        plannerHubId: plannerHubConnection.plannerHubId || "primary",
+        bookingMode: nextEnabled ? "watch_and_attempt" : "watch_only",
+      });
+    } finally {
+      setIsTogglingAutoBooking(false);
+    }
   }
 
   async function handleReset() {
@@ -1915,16 +1921,22 @@ export function ReservationAssistSection({
                   <button
                     type="button"
                     onClick={handleToggleAutoBooking}
-                    disabled={!currentTarget || currentTargetNeedsTieBreaker}
+                    disabled={!currentTarget || currentTargetNeedsTieBreaker || isTogglingAutoBooking}
                     className={classNames(
                       "inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition lg:w-[220px]",
                       targetAutoBookingEnabled
                         ? "border border-violet-200 bg-violet-600 text-white"
                         : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50",
-                      !currentTarget || currentTargetNeedsTieBreaker ? "cursor-not-allowed opacity-50" : ""
+                      !currentTarget || currentTargetNeedsTieBreaker || isTogglingAutoBooking ? "cursor-not-allowed opacity-50" : ""
                     )}
                   >
-                    {targetAutoBookingEnabled ? "Turn off auto booking" : "Turn on auto booking"}
+                    {isTogglingAutoBooking
+                      ? targetAutoBookingEnabled
+                        ? "Turning off..."
+                        : "Turning on..."
+                      : targetAutoBookingEnabled
+                        ? "Turn off auto booking"
+                        : "Turn on auto booking"}
                   </button>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-zinc-600">{watchTargetStatus.message}</p>

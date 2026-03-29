@@ -1761,18 +1761,30 @@ export async function updateWatchItemForUser(
   }
   item.currentStatus = resolveWatchItemStatus(item, lookup, preferences.importedDisneyMembers);
 
-  if (
-    item.bookingMode === "watch_and_attempt" &&
-    preferences.plannerHubBooking.enabled &&
-    plannerHubReadyForAutoAttempt(preferences, item)
-  ) {
-    try {
-      queuePlannerHubBookingJobInState(state, userId, {
-        watchItemId: item.id,
-        reason: `Disney booking attempt queued for ${item.date}.`,
-      });
-    } catch {
-      // Booking validation problems should not block the watch-item update itself.
+  let bookingQueueStatus: "queued" | "blocked" | "not_ready" | null = null;
+  let bookingQueueMessage = "";
+
+  if (item.bookingMode === "watch_and_attempt" && preferences.plannerHubBooking.enabled) {
+    const blockReason = getPlannerHubAutoAttemptBlockReason(preferences, item);
+
+    if (blockReason) {
+      bookingQueueStatus = "not_ready";
+      bookingQueueMessage = blockReason;
+    } else {
+      try {
+        queuePlannerHubBookingJobInState(state, userId, {
+          watchItemId: item.id,
+          reason: `Disney booking attempt queued for ${item.date}.`,
+        });
+        bookingQueueStatus = "queued";
+        bookingQueueMessage = `Disney booking attempt queued for ${item.date}.`;
+      } catch (error) {
+        bookingQueueStatus = "blocked";
+        bookingQueueMessage =
+          error instanceof Error && error.message
+            ? error.message
+            : "Auto-booking is on, but the Disney booking attempt could not queue yet.";
+      }
     }
   }
 
@@ -1793,6 +1805,8 @@ export async function updateWatchItemForUser(
       selectedImportedMemberIds: item.selectedImportedMemberIds,
       bookingMode: item.bookingMode,
     },
+    bookingQueueStatus,
+    bookingQueueMessage,
   };
 }
 
@@ -2040,6 +2054,28 @@ function plannerHubReadyForAutoAttempt(preferences: StoredPreferences, item: Sto
     item.selectedImportedMemberIds.length > 0 &&
     isWatchStatusReservable(item.currentStatus)
   );
+}
+
+function getPlannerHubAutoAttemptBlockReason(preferences: StoredPreferences, item: StoredWatchItem) {
+  if (preferences.plannerHubConnection.status !== "connected") {
+    return "Connect Disney on the active Mac first.";
+  }
+  if (!preferences.plannerHubConnection.hasLocalSession) {
+    return "Reconnect Disney on the active Mac first.";
+  }
+  if (!preferences.reservationAssist.stepTwoVerified) {
+    return "Finish the Reserve setup first so Disney member targeting can be trusted.";
+  }
+  if (item.preferredPark === "either" && !normalizeParkTieBreaker(item.eitherParkTieBreaker)) {
+    return "Choose Disneyland or California Adventure first for this Either Park watched date.";
+  }
+  if (!item.selectedImportedMemberIds.length) {
+    return "Select at least one imported Magic Key member first.";
+  }
+  if (!isWatchStatusReservable(item.currentStatus)) {
+    return "This watched date is not currently eligible for auto-booking.";
+  }
+  return null;
 }
 
 function getLocalWorkerDevicesForUser(state: BackendState, userId: string) {

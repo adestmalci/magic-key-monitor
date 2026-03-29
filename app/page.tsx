@@ -1107,6 +1107,9 @@ export default function Home() {
       };
 
       if (sessionUser) {
+        const previousItem = watchItems.find((item) => item.id === id) ?? null;
+        setWatchItems((current) => current.map((item) => (item.id === id ? applyLocal(item) : item)));
+
         const response = await fetch(`/api/watchlist/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1123,6 +1126,9 @@ export default function Home() {
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
+          if (previousItem) {
+            setWatchItems((current) => current.map((item) => (item.id === id ? previousItem : item)));
+          }
           pushToast("error", data.error || "We couldn't update that booking target yet.");
           setAccountSaveState("error");
           setAccountSaveMessage("A booking-target change did not reach your account.");
@@ -1132,6 +1138,15 @@ export default function Home() {
         setWatchItems((current) => current.map((item) => (item.id === id ? data.item : item)));
         setAccountSaveState("saved");
         setAccountSaveMessage(`Wishboard changes are saved to ${sessionUser.email}.`);
+        if (patch.bookingMode === "watch_and_attempt") {
+          if (data.bookingQueueStatus === "queued" && data.bookingQueueMessage) {
+            pushToast("success", data.bookingQueueMessage);
+          } else if (data.bookingQueueStatus === "not_ready" && data.bookingQueueMessage) {
+            pushToast("success", `Auto-booking is on. ${data.bookingQueueMessage}`);
+          } else if (data.bookingQueueStatus === "blocked" && data.bookingQueueMessage) {
+            pushToast("error", data.bookingQueueMessage);
+          }
+        }
         await loadDashboardState();
         await loadDisneyWorkerStatus();
         return;
@@ -1139,7 +1154,7 @@ export default function Home() {
 
       setWatchItems((current) => current.map((item) => (item.id === id ? applyLocal(item) : item)));
     },
-    [feedRows, importedDisneyMembers, loadDashboardState, loadDisneyWorkerStatus, pushToast, sessionUser]
+    [feedRows, importedDisneyMembers, loadDashboardState, loadDisneyWorkerStatus, pushToast, sessionUser, watchItems]
   );
 
   const connectDisneyPlannerHub = useCallback(
