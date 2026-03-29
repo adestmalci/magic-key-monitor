@@ -526,18 +526,18 @@ export function ReservationAssistSection({
   const showCheckpoint = reservationAssist.sessionStatus === "checking";
   const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestConnectJob, latestImportJob);
   const currentConnectionMeta = connectionTone[effectiveConnectionStatus];
-  const activeJobCandidates = [latestBookingJob, latestImportJob, latestConnectJob]
+  const activeConnectionCandidates = [latestImportJob, latestConnectJob]
     .filter((job): job is DisneyWorkerJob => isActiveWorkerJob(job))
     .sort((left, right) => Date.parse(getJobUpdatedAt(right) || "1970-01-01") - Date.parse(getJobUpdatedAt(left) || "1970-01-01"));
-  const activeDisneyJob = activeJobCandidates[0] || null;
-  const activeDisneyJobType = activeDisneyJob?.type || "";
-  const activePhaseOrder = activeDisneyJobType === "import" ? importLivePhaseOrder : connectLivePhaseOrder;
+  const activeConnectionJob = activeConnectionCandidates[0] || null;
+  const activeConnectionJobType = activeConnectionJob?.type || "";
+  const activePhaseOrder = activeConnectionJobType === "import" ? importLivePhaseOrder : connectLivePhaseOrder;
   const hasTerminalFailure =
     effectiveConnectionStatus === "failed" ||
     effectiveConnectionStatus === "paused_login" ||
     effectiveConnectionStatus === "paused_mismatch";
   const connectionTimeline = activePhaseOrder.map((phase) => {
-    const event = activeDisneyJob?.events.find((entry) => entry.phase === phase);
+    const event = activeConnectionJob?.events.find((entry) => entry.phase === phase);
     return {
       phase,
       label: phaseLabels[phase],
@@ -547,32 +547,40 @@ export function ReservationAssistSection({
     };
   });
   const failureEvent =
-    activeDisneyJob?.events.find((entry) => entry.phase === "paused_login") ||
-    activeDisneyJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
-    activeDisneyJob?.events.find((entry) => entry.phase === "failed") ||
+    activeConnectionJob?.events.find((entry) => entry.phase === "paused_login") ||
+    activeConnectionJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
+    activeConnectionJob?.events.find((entry) => entry.phase === "failed") ||
     null;
   const latestFailureMessage =
-    activeDisneyJob?.lastError ||
-    activeDisneyJob?.lastMessage ||
+    activeConnectionJob?.lastError ||
+    activeConnectionJob?.lastMessage ||
     plannerHubConnection.lastAuthFailureReason ||
     plannerHubConnection.lastRequiredActionMessage ||
     "";
   const latestWorkerMessage =
-    activeDisneyJob?.lastMessage ||
+    activeConnectionJob?.lastMessage ||
     plannerHubConnection.lastRequiredActionMessage ||
     (plannerHubConnection.hasLocalSession
       ? "The active Mac has a device-local Disney session ready for connect attempts."
       : "Pair a local Mac and sign into Disney there before you try to connect.");
   const claimedJobValue =
     plannerHubConnection.lastClaimedJobId ||
-    (activeDisneyJob?.startedAt ? activeDisneyJob.id : "") ||
+    (activeConnectionJob?.startedAt ? activeConnectionJob.id : "") ||
     "No claim recorded yet";
   const reportedJobValue =
     plannerHubConnection.lastReportedJobId ||
-    (activeDisneyJob?.finishedAt ? activeDisneyJob.id : "") ||
+    (activeConnectionJob?.finishedAt ? activeConnectionJob.id : "") ||
     "No report recorded yet";
   const correlationRows = [
-    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || activeDisneyJob?.id || "None yet" },
+    {
+      label: "Queued job",
+      value:
+        activeConnectionJob?.queuedAt || activeConnectionJob?.startedAt || activeConnectionJob?.finishedAt
+          ? activeConnectionJob.id
+          : plannerHubConnection.lastJobType === "connect" || plannerHubConnection.lastJobType === "import"
+            ? plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastJobId || "None yet"
+            : "None yet",
+    },
     { label: "Claimed job", value: claimedJobValue },
     { label: "Reported job", value: reportedJobValue },
     {
@@ -589,17 +597,22 @@ export function ReservationAssistSection({
     -1
   );
   const nextTimelineStep =
-    activeDisneyJob && lastCompletedTimelineIndex >= -1 && lastCompletedTimelineIndex < connectionTimeline.length - 1
+    activeConnectionJob && lastCompletedTimelineIndex >= -1 && lastCompletedTimelineIndex < connectionTimeline.length - 1
       ? connectionTimeline[lastCompletedTimelineIndex + 1]
       : null;
   const visibleTimeline =
-    connectionTimeline.filter((step) => step.complete).concat(activeDisneyJob && nextTimelineStep ? [nextTimelineStep] : []);
+    connectionTimeline
+      .filter((step) => step.complete)
+      .concat(activeConnectionJob && nextTimelineStep ? [nextTimelineStep] : []);
   const shouldShowDiagnostics =
     hasTerminalFailure ||
-    activeDisneyJob ||
-    Boolean(plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastClaimedJobId || plannerHubConnection.lastReportedJobId);
-  const showExpandedTimeline = activeDisneyJob || hasTerminalFailure;
-  const minimalConnectedState = effectiveConnectionStatus === "connected" && !activeDisneyJob && !hasTerminalFailure;
+    activeConnectionJob ||
+    Boolean(
+      (plannerHubConnection.lastJobType === "connect" || plannerHubConnection.lastJobType === "import") &&
+        (plannerHubConnection.lastQueuedJobId || plannerHubConnection.lastClaimedJobId || plannerHubConnection.lastReportedJobId)
+    );
+  const showExpandedTimeline = activeConnectionJob || hasTerminalFailure;
+  const minimalConnectedState = effectiveConnectionStatus === "connected" && !activeConnectionJob && !hasTerminalFailure;
   const showPairingSection = (!minimalConnectedState && !activeLocalDevice) || Boolean(pairToken);
   const importState = plannerHubConnection.lastImportStatus || (importJobActive ? "processing" : "");
   const importDiagnostics = latestImportJob?.diagnostics;
@@ -1368,7 +1381,7 @@ export function ReservationAssistSection({
             <div className="flex items-center justify-between gap-3">
               <div className="font-semibold text-zinc-900">Disney connection progress</div>
               <div className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700">
-                {activeDisneyJob
+                {activeConnectionJob
                   ? "Live polling"
                   : plannerHubConnection.latestJobUpdatedAt
                     ? `Updated ${formatSyncTime(plannerHubConnection.latestJobUpdatedAt)}`
@@ -1398,8 +1411,8 @@ export function ReservationAssistSection({
                       <p className="mt-1 leading-6 text-zinc-600">
                         {step.complete
                           ? `${formatSyncTime(step.at)} • ${step.message}`
-                          : activeDisneyJob
-                            ? "This is the next live step."
+                          : activeConnectionJob
+                            ? "Current live step."
                             : "Waiting for the next connect attempt."}
                       </p>
                     </div>
@@ -1417,7 +1430,11 @@ export function ReservationAssistSection({
               </div>
             ) : (
               <div className="mt-3 rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-4 text-sm leading-6 text-zinc-600">
-                No Disney connect attempt is in flight right now. Pair the Mac once, then use the connect button when you want the local worker to take over.
+                {effectiveConnectionStatus === "connected"
+                  ? `No Disney connection or party refresh is running right now. Last completed import: ${formatSyncTime(
+                      plannerHubConnection.lastImportFinishedAt || plannerHubConnection.lastImportedAt || plannerHubConnection.latestJobUpdatedAt
+                    )}.`
+                  : "No Disney connect or import attempt is in flight right now. Pair the Mac once, then use the connect button when you want the local worker to take over."}
               </div>
             )}
             {shouldShowDiagnostics && (
