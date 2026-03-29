@@ -164,10 +164,41 @@ const phaseLabels: Record<(typeof connectLivePhaseOrder)[number], string> = {
   completed: "Finished",
 };
 
+function getJobUpdatedAt(job: DisneyWorkerJob | null) {
+  if (!job) return "";
+  return job.updatedAt || job.startedAt || job.queuedAt || "";
+}
+
+function isActiveWorkerJob(job: DisneyWorkerJob | null) {
+  return Boolean(job && (job.status === "queued" || job.status === "processing"));
+}
+
 function deriveConnectionStatus(
   plannerHubConnection: PlannerHubConnectionState,
-  latestConnectJob: DisneyWorkerJob | null
+  latestConnectJob: DisneyWorkerJob | null,
+  latestImportJob: DisneyWorkerJob | null
 ): PlannerHubConnectionState["status"] {
+  const latestJobType = plannerHubConnection.lastJobType;
+  const latestJobStatus = plannerHubConnection.latestJobStatus;
+  const latestPhase = plannerHubConnection.latestPhase;
+
+  if (latestJobStatus === "processing" || latestJobStatus === "queued") {
+    if (latestJobType === "import") return "importing";
+    if (latestJobType === "connect") return "pending_connect";
+  }
+
+  if (latestJobStatus === "failed") {
+    if (latestPhase === "paused_login") return "paused_login";
+    if (latestPhase === "paused_mismatch") return "paused_mismatch";
+    if (latestJobType === "connect" || latestJobType === "import") return "failed";
+  }
+
+  const newestImportActivityAt = getJobUpdatedAt(latestImportJob);
+  const newestConnectActivityAt = getJobUpdatedAt(latestConnectJob);
+  if (newestImportActivityAt && newestConnectActivityAt && Date.parse(newestImportActivityAt) >= Date.parse(newestConnectActivityAt)) {
+    return plannerHubConnection.status;
+  }
+
   if (!latestConnectJob) {
     return plannerHubConnection.status;
   }
@@ -489,10 +520,13 @@ export function ReservationAssistSection({
     reservationAssist.confirmProofCaptured,
   ].filter(Boolean).length;
   const showCheckpoint = reservationAssist.sessionStatus === "checking";
-  const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestConnectJob);
+  const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestConnectJob, latestImportJob);
   const currentConnectionMeta = connectionTone[effectiveConnectionStatus];
-  const activeDisneyJob = importJobActive ? latestImportJob : connectJobActive ? latestConnectJob : null;
-  const activeDisneyJobType = importJobActive ? "import" : connectJobActive ? "connect" : "";
+  const activeJobCandidates = [latestBookingJob, latestImportJob, latestConnectJob]
+    .filter((job): job is DisneyWorkerJob => isActiveWorkerJob(job))
+    .sort((left, right) => Date.parse(getJobUpdatedAt(right) || "1970-01-01") - Date.parse(getJobUpdatedAt(left) || "1970-01-01"));
+  const activeDisneyJob = activeJobCandidates[0] || null;
+  const activeDisneyJobType = activeDisneyJob?.type || "";
   const activePhaseOrder = activeDisneyJobType === "import" ? importLivePhaseOrder : connectLivePhaseOrder;
   const hasTerminalFailure =
     effectiveConnectionStatus === "failed" ||
@@ -546,7 +580,14 @@ export function ReservationAssistSection({
         : "No worker result recorded yet",
     },
   ];
-  const nextTimelineStep = connectionTimeline.find((step) => !step.complete) || null;
+  const lastCompletedTimelineIndex = connectionTimeline.reduce(
+    (latestIndex, step, index) => (step.complete ? index : latestIndex),
+    -1
+  );
+  const nextTimelineStep =
+    activeDisneyJob && lastCompletedTimelineIndex >= -1 && lastCompletedTimelineIndex < connectionTimeline.length - 1
+      ? connectionTimeline[lastCompletedTimelineIndex + 1]
+      : null;
   const visibleTimeline =
     connectionTimeline.filter((step) => step.complete).concat(activeDisneyJob && nextTimelineStep ? [nextTimelineStep] : []);
   const shouldShowDiagnostics =
@@ -763,17 +804,39 @@ export function ReservationAssistSection({
     plannerHubConnection.lastImportedMemberCount > 0 &&
     !importFresh &&
     !importIsRefreshing;
-  const latestImportPhase = latestImportJob?.phase || "";
-  const latestImportUpdateAt = latestImportJob?.updatedAt || latestImportJob?.startedAt || latestImportJob?.queuedAt || "";
+  const liveImportPhase =
+    plannerHubConnection.latestJobStatus === "processing" &&
+    (plannerHubConnection.lastJobType === "import" || plannerHubConnection.lastJobType === "connect")
+      ? plannerHubConnection.latestPhase
+      : "";
+  const latestImportPhase = liveImportPhase || latestImportJob?.phase || "";
+  const latestImportUpdateAt = plannerHubConnection.latestPhaseAt || latestImportJob?.updatedAt || latestImportJob?.startedAt || latestImportJob?.queuedAt || "";
   const latestImportAcceptedCount =
     latestImportJob?.diagnostics?.acceptedMemberCount && latestImportJob.diagnostics.acceptedMemberCount > 0
       ? latestImportJob.diagnostics.acceptedMemberCount
-      : plannerHubConnection.lastImportedMemberCount;
+      : importedDisneyMembers.length > 0
+        ? importedDisneyMembers.length
+        : plannerHubConnection.importedMemberCount > 0
+          ? plannerHubConnection.importedMemberCount
+          : plannerHubConnection.lastImportedMemberCount;
   const workerSeenAt = activeLocalDevice?.lastSeenAt || activeLocalDevice?.lastCheckInAt || "";
-  const importWorkerWaiting = Boolean(importJobActive && (!latestImportJob?.startedAt || latestImportPhase === "queued") && !workerSeenAt);
-  const importWorkerActive = Boolean(importJobActive && latestImportJob?.startedAt && latestImportPhase && latestImportPhase !== "queued");
+  const importLiveActive =
+    plannerHubConnection.latestJobStatus === "processing" &&
+    (plannerHubConnection.lastJobType === "import" || plannerHubConnection.lastJobType === "connect");
+  const importWorkerWaiting = Boolean(
+    (importJobActive || importLiveActive) &&
+      (!latestImportJob?.startedAt || latestImportPhase === "queued") &&
+      !workerSeenAt
+  );
+  const importWorkerActive = Boolean(
+    (importJobActive || importLiveActive) &&
+      latestImportPhase &&
+      latestImportPhase !== "queued" &&
+      latestImportPhase !== "members_imported" &&
+      latestImportPhase !== "session_captured"
+  );
   const importFinalizing = Boolean(
-    importJobActive && (latestImportPhase === "members_imported" || latestImportPhase === "session_captured")
+    (importJobActive || importLiveActive) && (latestImportPhase === "members_imported" || latestImportPhase === "session_captured")
   );
   const importCardLabel = importWorkerWaiting
     ? "Queued for worker"
@@ -808,7 +871,8 @@ export function ReservationAssistSection({
     : importFinalizing
       ? `Imported ${latestImportAcceptedCount} connected Disney member${latestImportAcceptedCount === 1 ? "" : "s"}. Finalizing the Disney session snapshot now.`
       : importWorkerActive
-        ? latestImportJob?.lastMessage ||
+        ? plannerHubConnection.latestPhaseMessage ||
+          latestImportJob?.lastMessage ||
           plannerHubConnection.lastImportMessage ||
           "The active local Mac is refreshing the connected Disney party now."
         : importFresh

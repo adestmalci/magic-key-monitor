@@ -2153,13 +2153,15 @@ function getActivePlannerHubJobForUserByType(
   type: DisneyWorkerJobType
 ) {
   return (
-    state.plannerHubJobs.find(
-      (job) =>
-        job.userId === userId &&
-        job.plannerHubId === plannerHubId &&
-        job.type === type &&
-        (job.status === "queued" || job.status === "processing")
-    ) ?? null
+    state.plannerHubJobs
+      .filter(
+        (job) =>
+          job.userId === userId &&
+          job.plannerHubId === plannerHubId &&
+          job.type === type &&
+          (job.status === "queued" || job.status === "processing")
+      )
+      .sort((a, b) => Date.parse(b.updatedAt || b.queuedAt) - Date.parse(a.updatedAt || a.queuedAt))[0] ?? null
   );
 }
 
