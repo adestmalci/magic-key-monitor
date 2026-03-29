@@ -21,6 +21,8 @@ final class WorkerController: ObservableObject {
 
     private var workerProcess: Process?
     private var workerOutputPipe: Pipe?
+    private var shouldKeepWorkerAlive = false
+    private var intentionalStop = false
 
     var isRunning: Bool {
         status == "Running" && workerProcess?.isRunning == true
@@ -96,41 +98,15 @@ final class WorkerController: ObservableObject {
 
         do {
             let payload = try decodePayload()
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
-            configureOutputCapture(for: process)
-            process.environment = [
-                "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
-                "MAGIC_KEY_APP_URL": payload.appUrl,
-                "MAGIC_KEY_LOCAL_WORKER_TOKEN": payload.token,
-                "MAGIC_KEY_LOCAL_DEVICE_ID": payload.deviceId,
-                "MAGIC_KEY_LOCAL_DEVICE_NAME": deviceName.isEmpty ? payload.deviceName : deviceName,
-                "MAGIC_KEY_LOCAL_PROFILE_DIR": profilePath
-            ]
-            process.arguments = ["-lc", "npm run worker:disney:local"]
-            process.terminationHandler = { [weak self] task in
-                DispatchQueue.main.async {
-                    self?.status = "Stopped"
-                    self?.workerOutputPipe?.fileHandleForReading.readabilityHandler = nil
-                    self?.workerOutputPipe = nil
-                    if task.terminationStatus == 0 {
-                        self?.lastMessage = "The local Disney worker stopped."
-                    }
-                    if task.terminationStatus != 0 {
-                        self?.lastError = "Worker exited with code \(task.terminationStatus). Check the repo terminal or logs."
-                        if self?.lastMessage == "The local Disney worker is polling for Disney jobs on this Mac." {
-                            self?.lastMessage = "The local Disney worker stopped before it could start cleanly."
-                        }
-                    }
-                }
-            }
-            try process.run()
-            workerProcess = process
+            shouldKeepWorkerAlive = true
+            intentionalStop = false
+            try launchWorker(payload: payload)
             status = "Running"
             lastError = ""
             lastMessage = "The local Disney worker is polling for Disney jobs on this Mac."
         } catch {
+            shouldKeepWorkerAlive = false
+            intentionalStop = false
             status = "Stopped"
             lastError = error.localizedDescription
             lastMessage = "The local Disney worker could not start."
@@ -139,16 +115,81 @@ final class WorkerController: ObservableObject {
 
     func stopWorker() {
         guard isRunning else {
+            shouldKeepWorkerAlive = false
             lastError = ""
             lastMessage = "The local Disney worker is already stopped."
             return
         }
+        shouldKeepWorkerAlive = false
+        intentionalStop = true
         workerProcess?.terminate()
         workerProcess = nil
         workerOutputPipe?.fileHandleForReading.readabilityHandler = nil
         workerOutputPipe = nil
         status = "Stopped"
         lastMessage = "The local Disney worker is stopped."
+    }
+
+    private func launchWorker(payload: PairingPayload) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
+        configureOutputCapture(for: process)
+        process.environment = [
+            "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+            "MAGIC_KEY_APP_URL": payload.appUrl,
+            "MAGIC_KEY_LOCAL_WORKER_TOKEN": payload.token,
+            "MAGIC_KEY_LOCAL_DEVICE_ID": payload.deviceId,
+            "MAGIC_KEY_LOCAL_DEVICE_NAME": deviceName.isEmpty ? payload.deviceName : deviceName,
+            "MAGIC_KEY_LOCAL_PROFILE_DIR": profilePath
+        ]
+        process.arguments = ["-lc", "npm run worker:disney:local"]
+        process.terminationHandler = { [weak self] task in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.workerOutputPipe?.fileHandleForReading.readabilityHandler = nil
+                self.workerOutputPipe = nil
+                self.workerProcess = nil
+                self.status = "Stopped"
+
+                let shouldRestart = self.shouldKeepWorkerAlive && !self.intentionalStop
+                let exitCode = task.terminationStatus
+
+                if shouldRestart {
+                    self.lastError = exitCode == 0 ? "" : "Worker exited with code \(exitCode). Restarting automatically."
+                    self.lastMessage = "The local Disney worker stopped unexpectedly. Restarting now."
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        guard self.shouldKeepWorkerAlive else { return }
+                        do {
+                            let nextPayload = try self.decodePayload()
+                            try self.launchWorker(payload: nextPayload)
+                            self.status = "Running"
+                            self.lastError = ""
+                            self.lastMessage = "The local Disney worker restarted and is polling for Disney jobs on this Mac."
+                        } catch {
+                            self.shouldKeepWorkerAlive = false
+                            self.status = "Stopped"
+                            self.lastError = error.localizedDescription
+                            self.lastMessage = "The local Disney worker could not restart automatically."
+                        }
+                    }
+                    return
+                }
+
+                self.intentionalStop = false
+                if exitCode == 0 {
+                    self.lastMessage = "The local Disney worker stopped."
+                    self.lastError = ""
+                } else {
+                    self.lastError = "Worker exited with code \(exitCode). Check the repo terminal or logs."
+                    if self.lastMessage == "The local Disney worker is polling for Disney jobs on this Mac." {
+                        self.lastMessage = "The local Disney worker stopped before it could start cleanly."
+                    }
+                }
+            }
+        }
+        try process.run()
+        workerProcess = process
     }
 
     func openDisneyLogin() {

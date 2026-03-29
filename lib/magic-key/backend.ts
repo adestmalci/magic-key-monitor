@@ -2896,8 +2896,33 @@ function queuePlannerHubBookingJobInState(
     throw new Error("Booking attempts can only target imported Magic Key members in this phase.");
   }
 
-  if (getActivePlannerHubJobForUserByType(state, userId, plannerHubId, "booking")) {
-    throw new Error("A Disney booking attempt is already queued or running.");
+  const activeBookingJob = getActivePlannerHubJobForUserByType(state, userId, plannerHubId, "booking");
+  if (activeBookingJob) {
+    const anchor = getPlannerHubJobFreshnessAnchor(activeBookingJob);
+    const phaseTimedOut =
+      Boolean(anchor) &&
+      Date.now() - Date.parse(anchor) > getPlannerHubBookingPhaseTimeoutMs(activeBookingJob.phase || "");
+
+    if (phaseTimedOut || isPlannerHubJobStale(activeBookingJob)) {
+      const staleAt = new Date().toISOString();
+      const recoveryPayload = getPlannerHubBookingRecoveryPayload(activeBookingJob);
+      activeBookingJob.status = "failed";
+      activeBookingJob.phase = "failed";
+      activeBookingJob.finishedAt = staleAt;
+      activeBookingJob.updatedAt = staleAt;
+      activeBookingJob.lastError = recoveryPayload.summary;
+      activeBookingJob.lastMessage = recoveryPayload.summary;
+      activeBookingJob.events = [
+        ...normalizeDisneyWorkerEvents(activeBookingJob.events),
+        {
+          phase: "failed",
+          at: staleAt,
+          message: recoveryPayload.summary,
+        },
+      ];
+    } else {
+      throw new Error("A Disney booking attempt is already queued or running.");
+    }
   }
 
   if (!isPlannerHubImportFresh(preferences.plannerHubConnection)) {
