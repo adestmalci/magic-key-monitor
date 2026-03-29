@@ -22,6 +22,10 @@ final class WorkerController: ObservableObject {
     private var workerProcess: Process?
     private var workerOutputPipe: Pipe?
 
+    var isRunning: Bool {
+        status == "Running" && workerProcess?.isRunning == true
+    }
+
     static var defaultRepoPath: String = {
         let file = URL(fileURLWithPath: #filePath)
         return file
@@ -84,6 +88,12 @@ final class WorkerController: ObservableObject {
     }
 
     func startWorker() {
+        if isRunning {
+            lastError = ""
+            lastMessage = "The local Disney worker is already running on this Mac."
+            return
+        }
+
         do {
             let payload = try decodePayload()
             let process = Process()
@@ -128,6 +138,11 @@ final class WorkerController: ObservableObject {
     }
 
     func stopWorker() {
+        guard isRunning else {
+            lastError = ""
+            lastMessage = "The local Disney worker is already stopped."
+            return
+        }
         workerProcess?.terminate()
         workerProcess = nil
         workerOutputPipe?.fileHandleForReading.readabilityHandler = nil
@@ -241,9 +256,11 @@ struct TrayContentView: View {
                     Button("Start worker") {
                         controller.startWorker()
                     }
+                    .disabled(controller.isRunning)
                     Button("Stop worker") {
                         controller.stopWorker()
                     }
+                    .disabled(!controller.isRunning)
                 }
 
                 Button("Open Disney local login") {
@@ -288,6 +305,7 @@ struct TrayMenuView: View {
             Button("Start worker") {
                 controller.startWorker()
             }
+            .disabled(controller.isRunning)
 
             Button("Open Disney local login") {
                 controller.openDisneyLogin()
@@ -296,6 +314,7 @@ struct TrayMenuView: View {
             Button("Stop worker") {
                 controller.stopWorker()
             }
+            .disabled(!controller.isRunning)
         }
         .padding(14)
         .frame(width: 280)
