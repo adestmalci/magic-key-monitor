@@ -26,6 +26,7 @@ export async function PATCH(
     selectedImportedMemberIds: body?.selectedImportedMemberIds,
     bookingMode: body?.bookingMode,
     eitherParkTieBreaker: body?.eitherParkTieBreaker,
+    plannerHubBookingEnabled: typeof body?.plannerHubBookingEnabled === "boolean" ? body.plannerHubBookingEnabled : undefined,
   });
 
   if (!result.ok) {

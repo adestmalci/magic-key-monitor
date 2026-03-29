@@ -1110,7 +1110,15 @@ export default function Home() {
         const response = await fetch(`/api/watchlist/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
+          body: JSON.stringify({
+            ...patch,
+            plannerHubBookingEnabled:
+              patch.bookingMode === "watch_and_attempt"
+                ? true
+                : patch.bookingMode === "watch_only"
+                  ? watchItems.some((item) => item.id !== id && item.bookingMode === "watch_and_attempt")
+                  : undefined,
+          }),
         });
         const data = await response.json().catch(() => ({}));
 

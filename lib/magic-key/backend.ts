@@ -1715,7 +1715,11 @@ export async function importWatchItemsForUser(userId: string, items: WatchItem[]
 export async function updateWatchItemForUser(
   userId: string,
   id: string,
-  patch: Partial<Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode" | "eitherParkTieBreaker">>
+  patch: Partial<
+    Pick<WatchItem, "plannerHubId" | "selectedImportedMemberIds" | "bookingMode" | "eitherParkTieBreaker">
+  > & {
+    plannerHubBookingEnabled?: boolean;
+  }
 ) {
   const state = await readBackendState();
   const item = state.watchItems.find((row) => row.userId === userId && row.id === id);
@@ -1743,6 +1747,12 @@ export async function updateWatchItemForUser(
 
   const lookup = buildFeedLookup(await readStoredFeed());
   const preferences = getPreferencesFromState(state, userId);
+  if (typeof patch.plannerHubBookingEnabled === "boolean") {
+    preferences.plannerHubBooking = normalizePlannerHubBooking({
+      ...preferences.plannerHubBooking,
+      enabled: patch.plannerHubBookingEnabled,
+    });
+  }
   item.currentStatus = resolveWatchItemStatus(item, lookup, preferences.importedDisneyMembers);
 
   if (
