@@ -138,7 +138,7 @@ const connectionTone: Record<
   },
 };
 
-const livePhaseOrder = [
+const connectLivePhaseOrder = [
   "queued",
   "started",
   "disney_open",
@@ -150,7 +150,9 @@ const livePhaseOrder = [
   "completed",
 ] as const;
 
-const phaseLabels: Record<(typeof livePhaseOrder)[number], string> = {
+const importLivePhaseOrder = ["queued", "started", "select_party", "members_imported", "session_captured", "completed"] as const;
+
+const phaseLabels: Record<(typeof connectLivePhaseOrder)[number], string> = {
   queued: "Request queued",
   started: "Worker started",
   disney_open: "Opening Disney",
@@ -489,13 +491,15 @@ export function ReservationAssistSection({
   const showCheckpoint = reservationAssist.sessionStatus === "checking";
   const effectiveConnectionStatus = deriveConnectionStatus(plannerHubConnection, latestConnectJob);
   const currentConnectionMeta = connectionTone[effectiveConnectionStatus];
-  const activeDisneyJob = connectJobActive;
+  const activeDisneyJob = importJobActive ? latestImportJob : connectJobActive ? latestConnectJob : null;
+  const activeDisneyJobType = importJobActive ? "import" : connectJobActive ? "connect" : "";
+  const activePhaseOrder = activeDisneyJobType === "import" ? importLivePhaseOrder : connectLivePhaseOrder;
   const hasTerminalFailure =
     effectiveConnectionStatus === "failed" ||
     effectiveConnectionStatus === "paused_login" ||
     effectiveConnectionStatus === "paused_mismatch";
-  const connectionTimeline = livePhaseOrder.map((phase) => {
-    const event = latestConnectJob?.events.find((entry) => entry.phase === phase);
+  const connectionTimeline = activePhaseOrder.map((phase) => {
+    const event = activeDisneyJob?.events.find((entry) => entry.phase === phase);
     return {
       phase,
       label: phaseLabels[phase],
@@ -505,32 +509,32 @@ export function ReservationAssistSection({
     };
   });
   const failureEvent =
-    latestConnectJob?.events.find((entry) => entry.phase === "paused_login") ||
-    latestConnectJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
-    latestConnectJob?.events.find((entry) => entry.phase === "failed") ||
+    activeDisneyJob?.events.find((entry) => entry.phase === "paused_login") ||
+    activeDisneyJob?.events.find((entry) => entry.phase === "paused_mismatch") ||
+    activeDisneyJob?.events.find((entry) => entry.phase === "failed") ||
     null;
   const latestFailureMessage =
-    latestConnectJob?.lastError ||
-    latestConnectJob?.lastMessage ||
+    activeDisneyJob?.lastError ||
+    activeDisneyJob?.lastMessage ||
     plannerHubConnection.lastAuthFailureReason ||
     plannerHubConnection.lastRequiredActionMessage ||
     "";
   const latestWorkerMessage =
-    latestConnectJob?.lastMessage ||
+    activeDisneyJob?.lastMessage ||
     plannerHubConnection.lastRequiredActionMessage ||
     (plannerHubConnection.hasLocalSession
       ? "The active Mac has a device-local Disney session ready for connect attempts."
       : "Pair a local Mac and sign into Disney there before you try to connect.");
   const claimedJobValue =
     plannerHubConnection.lastClaimedJobId ||
-    (latestConnectJob?.startedAt ? latestConnectJob.id : "") ||
+    (activeDisneyJob?.startedAt ? activeDisneyJob.id : "") ||
     "No claim recorded yet";
   const reportedJobValue =
     plannerHubConnection.lastReportedJobId ||
-    (latestConnectJob?.finishedAt ? latestConnectJob.id : "") ||
+    (activeDisneyJob?.finishedAt ? activeDisneyJob.id : "") ||
     "No report recorded yet";
   const correlationRows = [
-    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || latestConnectJob?.id || "None yet" },
+    { label: "Queued job", value: plannerHubConnection.lastQueuedJobId || activeDisneyJob?.id || "None yet" },
     { label: "Claimed job", value: claimedJobValue },
     { label: "Reported job", value: reportedJobValue },
     {
@@ -759,18 +763,36 @@ export function ReservationAssistSection({
     plannerHubConnection.lastImportedMemberCount > 0 &&
     !importFresh &&
     !importIsRefreshing;
-  const importCardLabel = importIsRefreshing
-    ? "Refreshing now"
-    : importFresh
-      ? "Fresh"
-      : importIsStale
-        ? "Stale"
-        : importState === "failed"
-          ? "Failed"
-          : plannerHubConnection.lastImportedMemberCount > 0
-            ? "Last snapshot"
-            : "No import yet";
-  const importCardTone = importIsRefreshing
+  const latestImportPhase = latestImportJob?.phase || "";
+  const latestImportUpdateAt = latestImportJob?.updatedAt || latestImportJob?.startedAt || latestImportJob?.queuedAt || "";
+  const latestImportAcceptedCount =
+    latestImportJob?.diagnostics?.acceptedMemberCount && latestImportJob.diagnostics.acceptedMemberCount > 0
+      ? latestImportJob.diagnostics.acceptedMemberCount
+      : plannerHubConnection.lastImportedMemberCount;
+  const workerSeenAt = activeLocalDevice?.lastSeenAt || activeLocalDevice?.lastCheckInAt || "";
+  const importWorkerWaiting = Boolean(importJobActive && (!latestImportJob?.startedAt || latestImportPhase === "queued") && !workerSeenAt);
+  const importWorkerActive = Boolean(importJobActive && latestImportJob?.startedAt && latestImportPhase && latestImportPhase !== "queued");
+  const importFinalizing = Boolean(
+    importJobActive && (latestImportPhase === "members_imported" || latestImportPhase === "session_captured")
+  );
+  const importCardLabel = importWorkerWaiting
+    ? "Queued for worker"
+    : importFinalizing
+      ? "Imported, finalizing"
+      : importWorkerActive
+        ? "Worker actively importing"
+        : importIsRefreshing
+          ? "Refreshing now"
+          : importFresh
+            ? "Fresh"
+            : importIsStale
+              ? "Stale"
+              : importState === "failed"
+                ? "Failed"
+                : plannerHubConnection.lastImportedMemberCount > 0
+                  ? "Last snapshot"
+                  : "No import yet";
+  const importCardTone = importWorkerWaiting || importWorkerActive || importFinalizing || importIsRefreshing
     ? "border-sky-200 bg-sky-50 text-sky-900"
     : importFresh
       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
@@ -779,23 +801,43 @@ export function ReservationAssistSection({
         : importState === "failed"
           ? "border-rose-200 bg-rose-50 text-rose-900"
           : "border-zinc-200 bg-zinc-50 text-zinc-700";
-  const importCardMessage = importIsRefreshing
-    ? plannerHubConnection.lastImportMessage || "The active local Mac is refreshing the connected Disney party now."
-    : importFresh
-      ? `Last imported ${formatSyncTime(latestImportAt)}. ${plannerHubConnection.lastImportedMemberCount} connected Disney member${
-          plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"
-        } found.`
-      : importIsStale
-        ? `Last imported ${formatSyncTime(latestImportAt)}. This is the last known connected Disney party snapshot, and it is now stale.${
-            !sessionUser
-              ? " Sign in to let Reserve refresh this automatically for active watched dates and again right before auto-booking starts."
-              : hasReserveTargets
-                ? " Reserve refreshes this automatically once a day for active watched dates and again right before auto-booking starts."
-                : " Refresh it before relying on imported member targeting again."
-          }`
-        : importState === "failed"
-          ? plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "The last connected-party import failed."
-          : plannerHubConnection.lastImportMessage || "No connected Disney party import has finished yet.";
+  const importCardMessage = importWorkerWaiting
+    ? workerSeenAt
+      ? `Disney member import is queued and waiting for ${activeLocalDevice?.deviceName || "the active local Mac"} to claim it.`
+      : "Disney member import is queued and waiting for the worker."
+    : importFinalizing
+      ? `Imported ${latestImportAcceptedCount} connected Disney member${latestImportAcceptedCount === 1 ? "" : "s"}. Finalizing the Disney session snapshot now.`
+      : importWorkerActive
+        ? latestImportJob?.lastMessage ||
+          plannerHubConnection.lastImportMessage ||
+          "The active local Mac is refreshing the connected Disney party now."
+        : importFresh
+          ? `Last imported ${formatSyncTime(latestImportAt)}. ${plannerHubConnection.lastImportedMemberCount} connected Disney member${
+              plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"
+            } found.`
+          : importIsStale
+            ? `Last imported ${formatSyncTime(latestImportAt)}. This is the last known connected Disney party snapshot, and it is now stale.${
+                !sessionUser
+                  ? " Sign in to let Reserve refresh this automatically for active watched dates and again right before auto-booking starts."
+                  : hasReserveTargets
+                    ? " Reserve refreshes this automatically once a day for active watched dates and again right before auto-booking starts."
+                    : " Refresh it before relying on imported member targeting again."
+              }`
+            : importState === "failed"
+              ? plannerHubConnection.lastImportError || plannerHubConnection.lastImportMessage || "The last connected-party import failed."
+              : plannerHubConnection.lastImportMessage || "No connected Disney party import has finished yet.";
+  const importCardTimestamp = importFinalizing || importWorkerActive
+    ? latestImportUpdateAt
+    : importWorkerWaiting
+      ? plannerHubConnection.lastImportQueuedAt || latestImportJob?.queuedAt || ""
+      : latestImportAt || plannerHubConnection.lastImportQueuedAt;
+  const importCardTimestampLabel = importFinalizing || importWorkerActive
+    ? `Updated ${formatSyncTime(importCardTimestamp)}`
+    : importWorkerWaiting && importCardTimestamp
+      ? `Queued ${formatSyncTime(importCardTimestamp)}`
+      : importCardTimestamp
+        ? `Last import ${formatSyncTime(importCardTimestamp)}`
+        : "No import queued yet";
 
   useEffect(() => {
     if (!currentTarget || !hasReserveTargets || !sessionUser) {
@@ -1208,14 +1250,10 @@ export function ReservationAssistSection({
             <p className="mt-2 leading-6">{importCardMessage}</p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
               <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
-                {latestImportAt
-                  ? `Last import ${formatSyncTime(latestImportAt)}`
-                  : plannerHubConnection.lastImportQueuedAt
-                    ? `Queued ${formatSyncTime(plannerHubConnection.lastImportQueuedAt)}`
-                    : "No import queued yet"}
+                {importCardTimestampLabel}
               </span>
               <span className="rounded-full bg-white/80 px-3 py-1 text-zinc-700">
-                {plannerHubConnection.lastImportedMemberCount} accepted member{plannerHubConnection.lastImportedMemberCount === 1 ? "" : "s"}
+                {latestImportAcceptedCount} accepted member{latestImportAcceptedCount === 1 ? "" : "s"}
               </span>
             </div>
             {shouldShowImportDiagnostics && (
@@ -1889,13 +1927,11 @@ export function ReservationAssistSection({
                 </div>
                 <p className="mt-2 leading-6">{bookingAttemptMessage}</p>
                 {(currentImportRefreshActive
-                  ? plannerHubConnection.lastImportFinishedAt || plannerHubConnection.lastImportQueuedAt
+                  ? importCardTimestamp
                   : plannerHubBooking.lastBookingFinishedAt || plannerHubBooking.lastBookingQueuedAt) && (
                   <p className="mt-3 text-xs font-semibold text-zinc-700">
                     {currentImportRefreshActive
-                      ? plannerHubConnection.lastImportFinishedAt
-                        ? `Last import ${formatSyncTime(plannerHubConnection.lastImportFinishedAt)}`
-                        : `Queued ${formatSyncTime(plannerHubConnection.lastImportQueuedAt)}`
+                      ? importCardTimestampLabel
                       : plannerHubBooking.lastBookingFinishedAt
                         ? `Last attempt ${formatSyncTime(plannerHubBooking.lastBookingFinishedAt)}`
                         : `Queued ${formatSyncTime(plannerHubBooking.lastBookingQueuedAt)}`}

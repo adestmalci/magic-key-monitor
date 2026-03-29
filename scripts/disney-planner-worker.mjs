@@ -337,42 +337,51 @@ async function maybeLogin(page, email, password, progress) {
 }
 
 async function scrapeConnectedMembers(page, progress) {
-  await progress("select_party", "Opening Disney select-party to import connected members.");
-  await gotoWithRetry(page, SELECT_PARTY_URL, "Disney select-party");
-  await page.waitForTimeout(3000);
+  let lastDiagnostics = null;
 
-  const url = page.url();
-  if (url.includes("/profile")) {
-    return {
-      ok: false,
-      status: "paused_login",
-      reason: "Disney redirected to profile/login instead of the select-party screen.",
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt === 0) {
+      await progress("select_party", "Opening Disney select-party to import connected members.");
+    } else {
+      await progress("select_party", "Disney showed no connected members yet. Retrying the select-party import once.");
+    }
+
+    await gotoWithRetry(page, SELECT_PARTY_URL, "Disney select-party");
+    await page.waitForTimeout(attempt === 0 ? 3000 : 4000);
+
+    const url = page.url();
+    if (url.includes("/profile")) {
+      return {
+        ok: false,
+        status: "paused_login",
+        reason: "Disney redirected to profile/login instead of the select-party screen.",
+      };
+    }
+
+    const inspection = await inspectConnectedMembersFromPage(page);
+    const validMembers = inspection.extractedMembers.filter((member) => member && member.displayName && member.passLabel);
+    const diagnostics = {
+      extractedRowCount: inspection.extractedRowCount,
+      acceptedMemberCount: validMembers.length,
+      rejectedMemberCount: inspection.rejectedRows.length,
+      rejectionReasons: inspection.rejectedRows.map((row) => row.reason),
+      pageUrl: inspection.pageUrl,
     };
+    lastDiagnostics = diagnostics;
+
+    if (validMembers.length) {
+      const importedDisneyMembers = toImportedDisneyMembers(validMembers, "primary");
+      await progress("members_imported", `Imported ${importedDisneyMembers.length} connected Disney members.`);
+      return { ok: true, importedDisneyMembers, diagnostics };
+    }
   }
 
-  const inspection = await inspectConnectedMembersFromPage(page);
-  const validMembers = inspection.extractedMembers.filter((member) => member && member.displayName && member.passLabel);
-  const diagnostics = {
-    extractedRowCount: inspection.extractedRowCount,
-    acceptedMemberCount: validMembers.length,
-    rejectedMemberCount: inspection.rejectedRows.length,
-    rejectionReasons: inspection.rejectedRows.map((row) => row.reason),
-    pageUrl: inspection.pageUrl,
+  return {
+    ok: false,
+    status: "paused_mismatch",
+    reason: "Disney opened, but no connected party members were found on the select-party page after one automatic retry.",
+    diagnostics: lastDiagnostics,
   };
-
-  if (!validMembers.length) {
-    return {
-      ok: false,
-      status: "paused_mismatch",
-      reason: "Disney opened, but no connected party members were found on the select-party page.",
-      diagnostics,
-    };
-  }
-
-  const importedDisneyMembers = toImportedDisneyMembers(validMembers, "primary");
-
-  await progress("members_imported", `Imported ${importedDisneyMembers.length} connected Disney members.`);
-  return { ok: true, importedDisneyMembers, diagnostics };
 }
 
 async function checkVisibleCheckbox(row) {
