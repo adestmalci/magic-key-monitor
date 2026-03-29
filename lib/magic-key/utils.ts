@@ -8,7 +8,7 @@ import type {
   SyncMeta,
   WatchItem,
 } from "./types";
-import { DISNEY_IMPORT_FRESHNESS_MS } from "./config";
+import { DISNEY_IMPORT_DISPLAY_FRESHNESS_MS, DISNEY_IMPORT_FRESHNESS_MS } from "./config";
 
 export const WATCH_DATE_TIME_ZONE = "America/Los_Angeles";
 
@@ -97,6 +97,18 @@ export function isPlannerHubImportFresh(
   }
 
   return now - Date.parse(lastImportAt) <= DISNEY_IMPORT_FRESHNESS_MS;
+}
+
+export function isPlannerHubImportDisplayFresh(
+  connection: Pick<PlannerHubConnectionState, "lastImportFinishedAt" | "lastImportedAt" | "lastImportStatus">,
+  now = Date.now()
+) {
+  const lastImportAt = getLatestPlannerHubImportAt(connection);
+  if (!lastImportAt || connection.lastImportStatus !== "completed") {
+    return false;
+  }
+
+  return now - Date.parse(lastImportAt) <= DISNEY_IMPORT_DISPLAY_FRESHNESS_MS;
 }
 
 export function comparePriority(status: StatusType) {

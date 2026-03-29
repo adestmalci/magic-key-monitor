@@ -34,6 +34,7 @@ import {
   formatSyncTime,
   formatWatchDate,
   getLatestPlannerHubImportAt,
+  isPlannerHubImportDisplayFresh,
   isPlannerHubImportFresh,
   resolveAutoBookingPark,
   resolveStatus,
@@ -814,7 +815,7 @@ export function ReservationAssistSection({
 
   const hasReserveTargets = watchItems.length > 0;
   const latestImportAt = getLatestPlannerHubImportAt(plannerHubConnection);
-  const importFresh = isPlannerHubImportFresh(plannerHubConnection);
+  const importFresh = isPlannerHubImportDisplayFresh(plannerHubConnection);
   const importIsStale =
     Boolean(latestImportAt) &&
     plannerHubConnection.lastImportStatus === "completed" &&
